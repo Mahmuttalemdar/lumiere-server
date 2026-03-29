@@ -163,6 +163,11 @@ pub async fn get_test_app() -> &'static TestApp {
         // Set env to test
         std::env::set_var("LUMIERE_ENV", "test");
 
+        // Ensure working directory is workspace root (where config/ lives)
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let workspace_root = std::path::Path::new(manifest_dir).parent().unwrap().parent().unwrap();
+        std::env::set_current_dir(workspace_root).expect("Failed to set working directory to workspace root");
+
         // Load test config
         let config = AppConfig::load().expect("Failed to load test config");
 
@@ -175,15 +180,20 @@ pub async fn get_test_app() -> &'static TestApp {
         // Build router
         let app = build_router(state.clone());
 
-        // Bind to random port
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
+        // Bind to random port using std::net (not tokio) so we can read the address
+        let std_listener = std::net::TcpListener::bind("127.0.0.1:0")
             .expect("Failed to bind test server");
-        let addr = listener.local_addr().unwrap().to_string();
+        let addr = std_listener.local_addr().unwrap().to_string();
+        std_listener.set_nonblocking(true).unwrap();
 
-        // Spawn server in background
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
+        // Start server in a dedicated thread with its own runtime
+        // (each #[tokio::test] creates a new runtime, but we need the server to outlive all tests)
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let listener = tokio::net::TcpListener::from_std(std_listener).unwrap();
+                axum::serve(listener, app).await.ok();
+            });
         });
 
         // Wait for server to be ready

@@ -70,4 +70,4 @@ CREATE TABLE IF NOT EXISTS encrypted_messages (
     epoch           BIGINT,
     content_type    TEXT,
     PRIMARY KEY ((channel_id, bucket), message_id)
-) WITH CLUSTERING ORDER BY (message_id DESC)
+) WITH CLUSTERING ORDER BY (message_id DESC);

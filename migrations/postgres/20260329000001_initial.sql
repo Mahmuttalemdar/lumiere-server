@@ -291,7 +291,7 @@ CREATE TABLE notification_settings (
     suppress_everyone BOOLEAN NOT NULL DEFAULT false,
     suppress_roles  BOOLEAN NOT NULL DEFAULT false,
     level           SMALLINT NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, COALESCE(server_id, 0), COALESCE(channel_id, 0))
+    UNIQUE (user_id, server_id, channel_id)
 );
 
 -- ============================================

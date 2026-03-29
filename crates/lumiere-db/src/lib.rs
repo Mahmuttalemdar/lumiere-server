@@ -252,8 +252,14 @@ impl Database {
         for entry in entries {
             let content = std::fs::read_to_string(entry.path())?;
             for statement in content.split(';') {
-                let stmt = statement.trim();
-                if stmt.is_empty() || stmt.starts_with("--") {
+                // Strip comment lines from the statement
+                let stmt: String = statement
+                    .lines()
+                    .filter(|line| !line.trim_start().starts_with("--"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let stmt = stmt.trim();
+                if stmt.is_empty() {
                     continue;
                 }
                 // Skip USE statements (we already set keyspace)
