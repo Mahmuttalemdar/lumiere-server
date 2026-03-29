@@ -147,13 +147,21 @@ All **23 sprints** are implemented. Each sprint has its own detailed document in
 - **101 API endpoints** across 10 route modules
 - **12 crates**, ~11K lines of Rust
 
-### Known Technical Debt
-- ScyllaDB queries use `query_unpaged` instead of prepared statements
-- Media crate buffers full files in memory (no streaming)
-- Voice state Redis operations are not atomic (read-modify-write race)
-- Gateway resume doesn't replay missed events
-- Rate limiting middleware not yet implemented (only slowmode exists)
-- E2E encryption is schema-only (MLS protocol not implemented)
+### Phase 2 — Production Readiness (Next)
+See [sprints/phase2/OVERVIEW.md](sprints/phase2/OVERVIEW.md) for the 10-sprint plan:
+
+| Sprint | Topic | Priority |
+|--------|-------|----------|
+| P2-01 | Integration Testing & Smoke Tests | MUST |
+| P2-02 | ScyllaDB Prepared Statements | MUST |
+| P2-03 | Rate Limiting Middleware | MUST |
+| P2-04 | JetStream Consumers (Search, Push, Read State) | MUST |
+| P2-05 | Push Notifications — Real APNs & FCM | SHOULD |
+| P2-06 | Gateway Event Replay (Resume) | SHOULD |
+| P2-07 | Media Streaming (Upload/Download) | SHOULD |
+| P2-08 | Security Hardening & Input Sanitization | SHOULD |
+| P2-09 | End-to-End Testing & Load Testing | MUST |
+| P2-10 | E2E Encryption (MLS Protocol) | NICE |
 
 ### Production Deployment
 See memory file `deployment_checklist.md` for required env vars. Key guards:
