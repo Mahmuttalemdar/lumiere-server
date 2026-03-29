@@ -2065,9 +2065,14 @@ name = "lumiere-push"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "jsonwebtoken 9.3.1",
  "lumiere-models",
+ "reqwest",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

@@ -77,11 +77,51 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<Arc<AppState>>
         }
     };
 
-    // Push notification service (in-memory token store for now).
-    // APNs/FCM clients are not configured by default — set via environment.
+    // Push notification service — PostgreSQL-backed token store, real APNs/FCM
+    // clients if credentials are configured, otherwise graceful degradation.
     let push = {
-        let token_store = std::sync::Arc::new(lumiere_push::DeviceTokenStore::new());
-        Some(lumiere_push::PushService::new(None, None, token_store))
+        let token_store = std::sync::Arc::new(lumiere_push::TokenStoreBackend::Postgres(
+            lumiere_push::PgDeviceTokenStore::new(db.pg.clone()),
+        ));
+
+        let apns = config
+            .push
+            .apns
+            .as_ref()
+            .and_then(|cfg| {
+                match lumiere_push::ApnsClient::new(
+                    &cfg.key_path,
+                    &cfg.key_id,
+                    &cfg.team_id,
+                    &cfg.bundle_id,
+                    cfg.sandbox,
+                ) {
+                    Ok(client) => Some(client),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "APNs client not available — iOS push disabled");
+                        None
+                    }
+                }
+            });
+
+        let fcm = config
+            .push
+            .fcm
+            .as_ref()
+            .and_then(|cfg| {
+                match lumiere_push::FcmClient::new(
+                    &cfg.service_account_key_path,
+                    &cfg.project_id,
+                ) {
+                    Ok(client) => Some(client),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "FCM client not available — Android push disabled");
+                        None
+                    }
+                }
+            });
+
+        Some(lumiere_push::PushService::new(apns, fcm, token_store))
     };
 
     Ok(Arc::new(AppState {
@@ -141,6 +181,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .nest("/api/v1/channels", routes::messages::router())
         .nest("/api/v1/channels", routes::reactions::router())
         .nest("/api/v1/channels", routes::typing::router())
+        .nest("/api/v1/users", routes::devices::router())
         .nest("/api/v1/users", routes::typing::user_unread_router())
         .nest("/api/v1/servers", routes::typing::server_ack_router())
         .nest("/api/v1/servers", routes::moderation::router())

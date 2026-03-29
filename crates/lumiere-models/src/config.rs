@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub minio: MinioConfig,
     pub livekit: LivekitConfig,
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub push: PushConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,6 +82,39 @@ pub struct AuthConfig {
     pub jwt_secret: String,
     pub access_token_ttl: u64,
     pub refresh_token_ttl: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct PushConfig {
+    pub apns: Option<ApnsConfig>,
+    pub fcm: Option<FcmConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApnsConfig {
+    /// Path to the `.p8` signing key file.
+    pub key_path: String,
+    /// 10-character Key ID from App Store Connect.
+    pub key_id: String,
+    /// 10-character Team ID.
+    pub team_id: String,
+    /// Bundle identifier (e.g. `com.lumiere.app`).
+    pub bundle_id: String,
+    /// Use the sandbox APNs endpoint (default: true for development).
+    #[serde(default = "default_apns_sandbox")]
+    pub sandbox: bool,
+}
+
+fn default_apns_sandbox() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FcmConfig {
+    /// Path to the Firebase service account JSON key file.
+    pub service_account_key_path: String,
+    /// Firebase project ID (e.g. `lumiere-12345`).
+    pub project_id: String,
 }
 
 impl AppConfig {

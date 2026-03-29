@@ -1,3 +1,7 @@
+pub mod apns;
+pub mod fcm;
+pub mod pg_store;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -6,6 +10,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
+
+// Re-exports for convenience.
+pub use apns::ApnsClient;
+pub use fcm::FcmClient;
+pub use pg_store::PgDeviceTokenStore;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -48,6 +57,9 @@ pub enum Platform {
 /// A device token registered by a client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceToken {
+    /// Database ID (Snowflake). Present when loaded from store.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Snowflake>,
     /// Opaque token string (hex for APNs, registration token for FCM).
     pub token: String,
     pub platform: Platform,
@@ -106,7 +118,7 @@ impl PushNotification {
 }
 
 // ---------------------------------------------------------------------------
-// APNs client (stub)
+// APNs / FCM configuration types (kept for backward compatibility)
 // ---------------------------------------------------------------------------
 
 /// Configuration for the Apple Push Notification service.
@@ -120,76 +132,9 @@ pub struct ApnsConfig {
     pub team_id: String,
     /// Bundle identifier (e.g. `com.lumiere.app`).
     pub bundle_id: String,
-    /// Use the production APNs endpoint (`true`) or sandbox (`false`).
-    pub production: bool,
+    /// Use the sandbox APNs endpoint (`true`) or production (`false`).
+    pub sandbox: bool,
 }
-
-/// Placeholder APNs client. In production this will hold an HTTP/2 connection
-/// pool and a signed JWT cache.
-pub struct ApnsClient {
-    config: ApnsConfig,
-}
-
-impl ApnsClient {
-    pub fn new(config: ApnsConfig) -> Self {
-        info!(
-            bundle_id = %config.bundle_id,
-            production = config.production,
-            "APNs client initialised (stub)"
-        );
-        Self { config }
-    }
-
-    /// Send a push notification to a single APNs device token.
-    ///
-    /// TODO: Real implementation requires:
-    ///   1. Load the `.p8` ES256 private key from `config.key_path`.
-    ///   2. Mint a short-lived JWT (iss = team_id, kid = key_id).
-    ///   3. Open an HTTP/2 connection to
-    ///      `api.push.apple.com` (prod) or `api.sandbox.push.apple.com`.
-    ///   4. POST to `/3/device/{device_token}` with JSON payload:
-    ///      ```json
-    ///      {
-    ///        "aps": {
-    ///          "alert": { "title": "...", "body": "..." },
-    ///          "badge": N,
-    ///          "sound": "default",
-    ///          "thread-id": "..."
-    ///        },
-    ///        ...custom data keys
-    ///      }
-    ///      ```
-    ///   5. Handle HTTP 200 (success), 410 (unregistered — remove token),
-    ///      and other error codes.
-    ///   6. Maintain a connection pool and reuse HTTP/2 streams.
-    pub async fn send(
-        &self,
-        device_token: &str,
-        notification: &PushNotification,
-    ) -> PushResult<()> {
-        info!(
-            token = &device_token[..8.min(device_token.len())],
-            title = %notification.title,
-            bundle_id = %self.config.bundle_id,
-            "APNs send (stub) — would deliver push notification"
-        );
-
-        // TODO: Replace with real HTTP/2 request to APNs.
-        // Validate APNs device token format: must be exactly 64 hex characters.
-        if device_token.len() != 64 || !device_token.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(PushError::InvalidToken(format!(
-                "APNs token must be exactly 64 hex characters, got {} chars",
-                device_token.len()
-            )));
-        }
-
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// FCM client (stub)
-// ---------------------------------------------------------------------------
 
 /// Configuration for Firebase Cloud Messaging.
 #[derive(Debug, Clone)]
@@ -200,81 +145,13 @@ pub struct FcmConfig {
     pub project_id: String,
 }
 
-/// Placeholder FCM client. In production this will hold an OAuth2 token cache
-/// and an HTTP client for the FCM v1 API.
-pub struct FcmClient {
-    config: FcmConfig,
-}
-
-impl FcmClient {
-    pub fn new(config: FcmConfig) -> Self {
-        info!(
-            project_id = %config.project_id,
-            "FCM client initialised (stub)"
-        );
-        Self { config }
-    }
-
-    /// Send a push notification to a single FCM registration token.
-    ///
-    /// TODO: Real implementation requires:
-    ///   1. Load the service account JSON from `config.service_account_key_path`.
-    ///   2. Obtain an OAuth2 access token (JWT grant, scope
-    ///      `https://www.googleapis.com/auth/firebase.messaging`).
-    ///   3. POST to `https://fcm.googleapis.com/v1/projects/{project_id}/messages:send`
-    ///      with JSON body:
-    ///      ```json
-    ///      {
-    ///        "message": {
-    ///          "token": "...",
-    ///          "notification": { "title": "...", "body": "..." },
-    ///          "android": { "notification": { "sound": "default" } },
-    ///          "data": { ... }
-    ///        }
-    ///      }
-    ///      ```
-    ///   4. Handle success, `UNREGISTERED` (remove token), quota errors, etc.
-    ///   5. Cache the OAuth2 token and refresh before expiry.
-    pub async fn send(
-        &self,
-        registration_token: &str,
-        notification: &PushNotification,
-    ) -> PushResult<()> {
-        info!(
-            token = &registration_token[..8.min(registration_token.len())],
-            title = %notification.title,
-            project_id = %self.config.project_id,
-            "FCM send (stub) — would deliver push notification"
-        );
-
-        // TODO: Replace with real FCM v1 HTTP request.
-        if registration_token.is_empty() {
-            return Err(PushError::InvalidToken(
-                "FCM registration token is empty".to_string(),
-            ));
-        }
-
-        Ok(())
-    }
-}
-
 // ---------------------------------------------------------------------------
-// Device token store (in-memory for now)
+// Token store — enum dispatch (dyn-compatible without async trait hacks)
 // ---------------------------------------------------------------------------
 
-/// In-memory device token store. Will be backed by PostgreSQL in production.
-///
-/// WARNING: This is an in-memory store. All tokens are lost on server restart.
-/// For production use, this MUST be backed by Redis or a database (PostgreSQL).
-///
-/// TODO: Replace with database-backed storage:
-///   - Table `device_tokens (user_id BIGINT, token TEXT, platform TEXT,
-///     device_name TEXT, created_at TIMESTAMPTZ, last_used_at TIMESTAMPTZ)`
-///   - Unique constraint on `(user_id, token)`.
-///   - Index on `user_id` for fast lookup.
+/// In-memory device token store for tests and development.
 #[derive(Debug, Default)]
 pub struct DeviceTokenStore {
-    /// user_id -> list of registered device tokens
     tokens: RwLock<HashMap<Snowflake, Vec<DeviceToken>>>,
 }
 
@@ -286,28 +163,15 @@ impl DeviceTokenStore {
     }
 
     /// Register a device token for a user. Replaces any existing entry with
-    /// the same token string (re-registration after app reinstall, etc.).
+    /// the same token string.
     pub async fn register(&self, device: DeviceToken) {
         let mut map = self.tokens.write().await;
         let entries = map.entry(device.user_id).or_default();
-
-        // Remove any previous registration with the same raw token.
         entries.retain(|d| d.token != device.token);
         entries.push(device);
     }
 
-    /// Unregister a specific device token (e.g. on logout or 410 from APNs).
-    pub async fn unregister(&self, user_id: Snowflake, token: &str) -> bool {
-        let mut map = self.tokens.write().await;
-        if let Some(entries) = map.get_mut(&user_id) {
-            let before = entries.len();
-            entries.retain(|d| d.token != token);
-            return entries.len() < before;
-        }
-        false
-    }
-
-    /// Unregister all tokens for a user (e.g. account deletion).
+    /// Unregister all tokens for a user.
     pub async fn unregister_all(&self, user_id: Snowflake) {
         let mut map = self.tokens.write().await;
         map.remove(&user_id);
@@ -319,12 +183,55 @@ impl DeviceTokenStore {
         map.get(&user_id).cloned().unwrap_or_default()
     }
 
-    /// Remove a token by its raw string across all users. Useful when APNs
-    /// reports a token as invalid (410 response).
+    /// Unregister a specific device token.
+    pub async fn unregister(&self, user_id: Snowflake, token: &str) -> bool {
+        let mut map = self.tokens.write().await;
+        if let Some(entries) = map.get_mut(&user_id) {
+            let before = entries.len();
+            entries.retain(|d| d.token != token);
+            return entries.len() < before;
+        }
+        false
+    }
+
+    /// Remove a token by its raw string across all users.
     pub async fn remove_invalid_token(&self, token: &str) {
         let mut map = self.tokens.write().await;
         for entries in map.values_mut() {
             entries.retain(|d| d.token != token);
+        }
+    }
+}
+
+/// Enum-based token store dispatch. Avoids `dyn` + async trait issues.
+pub enum TokenStoreBackend {
+    InMemory(DeviceTokenStore),
+    Postgres(PgDeviceTokenStore),
+}
+
+impl TokenStoreBackend {
+    pub async fn get_tokens(&self, user_id: Snowflake) -> Vec<DeviceToken> {
+        match self {
+            Self::InMemory(s) => s.get_tokens(user_id).await,
+            Self::Postgres(s) => s.get_tokens(user_id).await.unwrap_or_default(),
+        }
+    }
+
+    pub async fn remove_invalid_token(&self, token: &str) {
+        match self {
+            Self::InMemory(s) => s.remove_invalid_token(token).await,
+            Self::Postgres(s) => {
+                if let Err(e) = s.remove_invalid_token(token).await {
+                    warn!(error = %e, "Failed to remove invalid token from database");
+                }
+            }
+        }
+    }
+
+    pub async fn unregister(&self, user_id: Snowflake, token: &str) -> bool {
+        match self {
+            Self::InMemory(s) => s.unregister(user_id, token).await,
+            Self::Postgres(s) => s.unregister(user_id, token).await.unwrap_or(false),
         }
     }
 }
@@ -335,29 +242,36 @@ impl DeviceTokenStore {
 
 /// Central push notification service that dispatches to APNs or FCM based on
 /// the target device platform.
+///
+/// Construction uses `Option<ApnsClient>` and `Option<FcmClient>` so that
+/// each platform degrades gracefully to a log-only stub when credentials
+/// are not configured (development environments).
 pub struct PushService {
     apns: Option<ApnsClient>,
     fcm: Option<FcmClient>,
-    tokens: Arc<DeviceTokenStore>,
+    tokens: Arc<TokenStoreBackend>,
 }
 
 impl PushService {
-    /// Create a new push service. Either or both clients may be `None` if that
-    /// platform is not configured (e.g. development environments).
+    /// Create a push service with optional real clients.
+    ///
+    /// Pass `None` for APNs/FCM configs to use log-only stubs for that platform.
     pub fn new(
-        apns_config: Option<ApnsConfig>,
-        fcm_config: Option<FcmConfig>,
-        tokens: Arc<DeviceTokenStore>,
+        apns: Option<ApnsClient>,
+        fcm: Option<FcmClient>,
+        tokens: Arc<TokenStoreBackend>,
     ) -> Self {
-        Self {
-            apns: apns_config.map(ApnsClient::new),
-            fcm: fcm_config.map(FcmClient::new),
-            tokens,
+        if apns.is_none() {
+            info!("APNs client not configured — iOS push notifications will be skipped");
         }
+        if fcm.is_none() {
+            info!("FCM client not configured — Android push notifications will be skipped");
+        }
+        Self { apns, fcm, tokens }
     }
 
     /// Reference to the shared device token store.
-    pub fn token_store(&self) -> &Arc<DeviceTokenStore> {
+    pub fn token_store(&self) -> &Arc<TokenStoreBackend> {
         &self.tokens
     }
 
@@ -411,9 +325,15 @@ impl PushService {
                         reason = %reason,
                         "removing invalid device token"
                     );
-                    self.tokens
-                        .unregister(user_id, &device.token)
-                        .await;
+                    self.tokens.remove_invalid_token(&device.token).await;
+                }
+                Err(PushError::PlatformNotConfigured(platform)) => {
+                    // Platform not configured — skip silently in development.
+                    warn!(
+                        user_id = %user_id.value(),
+                        platform = ?platform,
+                        "push platform not configured, skipping"
+                    );
                 }
                 Err(e) => {
                     warn!(
@@ -466,20 +386,13 @@ impl PushService {
 mod tests {
     use super::*;
 
-    fn test_apns_config() -> ApnsConfig {
-        ApnsConfig {
-            key_path: "/tmp/fake.p8".to_string(),
-            key_id: "ABC123DEF4".to_string(),
-            team_id: "TEAM56789A".to_string(),
-            bundle_id: "com.lumiere.app".to_string(),
-            production: false,
-        }
-    }
-
-    fn test_fcm_config() -> FcmConfig {
-        FcmConfig {
-            service_account_key_path: "/tmp/fake-sa.json".to_string(),
-            project_id: "lumiere-test".to_string(),
+    fn make_device(user_id: u64, token: &str, platform: Platform) -> DeviceToken {
+        DeviceToken {
+            id: None,
+            token: token.to_string(),
+            platform,
+            user_id: Snowflake::new(user_id),
+            device_name: None,
         }
     }
 
@@ -514,12 +427,11 @@ mod tests {
         let user_id = Snowflake::new(1001);
 
         store
-            .register(DeviceToken {
-                token: "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344".to_string(),
-                platform: Platform::Ios,
-                user_id,
-                device_name: Some("Test iPhone".to_string()),
-            })
+            .register(make_device(
+                1001,
+                "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344",
+                Platform::Ios,
+            ))
             .await;
 
         let tokens = store.get_tokens(user_id).await;
@@ -530,89 +442,40 @@ mod tests {
     #[tokio::test]
     async fn test_device_token_store_dedup() {
         let store = DeviceTokenStore::new();
-        let user_id = Snowflake::new(1002);
-        let token_str = "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344".to_string();
+        let token_str = "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344";
 
         for _ in 0..3 {
-            store
-                .register(DeviceToken {
-                    token: token_str.clone(),
-                    platform: Platform::Ios,
-                    user_id,
-                    device_name: None,
-                })
-                .await;
+            store.register(make_device(1002, token_str, Platform::Ios)).await;
         }
 
-        let tokens = store.get_tokens(user_id).await;
+        let tokens = store.get_tokens(Snowflake::new(1002)).await;
         assert_eq!(tokens.len(), 1, "duplicate tokens should be deduplicated");
     }
 
     #[tokio::test]
     async fn test_device_token_store_unregister() {
         let store = DeviceTokenStore::new();
-        let user_id = Snowflake::new(1003);
-        let token_str = "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344".to_string();
+        let token_str = "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344";
 
-        store
-            .register(DeviceToken {
-                token: token_str.clone(),
-                platform: Platform::Android,
-                user_id,
-                device_name: None,
-            })
-            .await;
+        store.register(make_device(1003, token_str, Platform::Android)).await;
 
-        assert!(store.unregister(user_id, &token_str).await);
-        assert!(store.get_tokens(user_id).await.is_empty());
+        assert!(store.unregister(Snowflake::new(1003), token_str).await);
+        assert!(store.get_tokens(Snowflake::new(1003)).await.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_send_to_device_ios_stub() {
-        let tokens = Arc::new(DeviceTokenStore::new());
-        let service = PushService::new(Some(test_apns_config()), None, tokens);
-
-        let device = DeviceToken {
-            token: "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344".to_string(),
-            platform: Platform::Ios,
-            user_id: Snowflake::new(2001),
-            device_name: None,
-        };
-
-        let notif = PushNotification::new("Test", "Hello iOS");
-        let result = service.send_to_device(&device, &notif).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_send_to_device_android_stub() {
-        let tokens = Arc::new(DeviceTokenStore::new());
-        let service = PushService::new(None, Some(test_fcm_config()), tokens);
-
-        let device = DeviceToken {
-            token: "fcm-registration-token-value".to_string(),
-            platform: Platform::Android,
-            user_id: Snowflake::new(2002),
-            device_name: None,
-        };
-
-        let notif = PushNotification::new("Test", "Hello Android");
-        let result = service.send_to_device(&device, &notif).await;
-        assert!(result.is_ok());
+    fn in_memory_backend() -> Arc<TokenStoreBackend> {
+        Arc::new(TokenStoreBackend::InMemory(DeviceTokenStore::new()))
     }
 
     #[tokio::test]
     async fn test_send_fails_without_platform_config() {
-        let tokens = Arc::new(DeviceTokenStore::new());
-        // No APNs or FCM configured
-        let service = PushService::new(None, None, tokens);
+        let service = PushService::new(None, None, in_memory_backend());
 
-        let device = DeviceToken {
-            token: "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344".to_string(),
-            platform: Platform::Ios,
-            user_id: Snowflake::new(2003),
-            device_name: None,
-        };
+        let device = make_device(
+            2003,
+            "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344",
+            Platform::Ios,
+        );
 
         let notif = PushNotification::new("Test", "Should fail");
         let result = service.send_to_device(&device, &notif).await;
@@ -620,41 +483,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_to_user() {
-        let tokens = Arc::new(DeviceTokenStore::new());
-        let user_id = Snowflake::new(3001);
-
-        tokens
-            .register(DeviceToken {
-                token: "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344".to_string(),
-                platform: Platform::Ios,
-                user_id,
-                device_name: Some("iPhone".to_string()),
-            })
-            .await;
-
-        tokens
-            .register(DeviceToken {
-                token: "fcm-token-for-android-device".to_string(),
-                platform: Platform::Android,
-                user_id,
-                device_name: Some("Pixel".to_string()),
-            })
-            .await;
-
-        let service =
-            PushService::new(Some(test_apns_config()), Some(test_fcm_config()), tokens);
-
-        let notif = PushNotification::new("New message", "Hey there!");
-        let delivered = service.send_to_user(user_id, &notif).await.unwrap();
-        assert_eq!(delivered, 2);
-    }
-
-    #[tokio::test]
     async fn test_send_to_user_no_tokens() {
-        let tokens = Arc::new(DeviceTokenStore::new());
-        let service =
-            PushService::new(Some(test_apns_config()), Some(test_fcm_config()), tokens);
+        let service = PushService::new(None, None, in_memory_backend());
 
         let notif = PushNotification::new("Test", "No devices");
         let result = service.send_to_user(Snowflake::new(9999), &notif).await;
@@ -664,20 +494,13 @@ mod tests {
     #[tokio::test]
     async fn test_remove_invalid_token_across_users() {
         let store = DeviceTokenStore::new();
-        let shared_token = "shared-invalid-token-xxxxxxxxxxxxxx".to_string();
+        let shared_token = "shared-invalid-token-xxxxxxxxxxxxxx";
 
         for uid in [5001, 5002, 5003] {
-            store
-                .register(DeviceToken {
-                    token: shared_token.clone(),
-                    platform: Platform::Android,
-                    user_id: Snowflake::new(uid),
-                    device_name: None,
-                })
-                .await;
+            store.register(make_device(uid, shared_token, Platform::Android)).await;
         }
 
-        store.remove_invalid_token(&shared_token).await;
+        store.remove_invalid_token(shared_token).await;
 
         for uid in [5001, 5002, 5003] {
             assert!(store.get_tokens(Snowflake::new(uid)).await.is_empty());
