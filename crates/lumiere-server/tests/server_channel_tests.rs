@@ -693,20 +693,21 @@ async fn test_role_hierarchy_kick() {
     let (owner_token, _uid, server_id) = setup_server("rhk").await;
     let app = get_test_app().await;
 
-    // Create a high role and a low role
-    let high_res = app.post(&owner_token, &format!("/api/v1/servers/{}/roles", server_id), serde_json::json!({
-        "name": "High Role",
-        "permissions": "32"  // KICK_MEMBERS
-    })).await;
-    let high_role: serde_json::Value = high_res.json().await.unwrap();
-    let high_role_id = high_role["id"].as_str().unwrap().parse::<i64>().unwrap();
-
+    // Create roles — position increases with each role created.
+    // "Low Role" is created first (lower position), "High Role" second (higher position).
     let low_res = app.post(&owner_token, &format!("/api/v1/servers/{}/roles", server_id), serde_json::json!({
         "name": "Low Role",
         "permissions": "32"  // KICK_MEMBERS
     })).await;
     let low_role: serde_json::Value = low_res.json().await.unwrap();
     let low_role_id = low_role["id"].as_str().unwrap().parse::<i64>().unwrap();
+
+    let high_res = app.post(&owner_token, &format!("/api/v1/servers/{}/roles", server_id), serde_json::json!({
+        "name": "High Role",
+        "permissions": "32"  // KICK_MEMBERS
+    })).await;
+    let high_role: serde_json::Value = high_res.json().await.unwrap();
+    let high_role_id = high_role["id"].as_str().unwrap().parse::<i64>().unwrap();
 
     // Add two members
     let (_high_token, high_uid) = join_server(server_id, &owner_token).await;

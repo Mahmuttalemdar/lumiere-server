@@ -62,7 +62,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
     let (tx, mut rx) = mpsc::channel::<GatewayMessage>(OUTBOUND_CHANNEL_CAPACITY);
 
     // Spawn sender task
-    let sender_task = tokio::spawn(async move {
+    let mut sender_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let Ok(text) = serde_json::to_string(&msg) {
                 if ws_sink.send(Message::Text(text.into())).await.is_err() {
@@ -211,6 +211,13 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
         h.abort();
     }
 
+    // Drop the sender so the sender_task can flush remaining messages (e.g., InvalidSession)
+    // and then exit cleanly when its rx.recv() returns None.
+    drop(tx);
+    // Give the sender task a moment to flush any queued messages before we continue cleanup.
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(200), &mut sender_task).await;
+    sender_task.abort();
+
     // Cleanup: remove session
     if let Some(ref s) = session {
         // Store session buffer in Redis for resume
@@ -250,8 +257,6 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
             }
         });
     }
-
-    sender_task.abort();
 }
 
 async fn handle_identify(
@@ -346,13 +351,16 @@ async fn handle_identify(
     // Subscribe to NATS subjects and forward events
     let handles = spawn_nats_listener(state, &session, &servers, &dms).await;
 
-    // Broadcast online presence
+    // Broadcast online presence to user's own subject and all their servers
     let presence_event = serde_json::json!({
         "type": "PRESENCE_UPDATE",
         "user_id": user_id,
         "status": "online",
     });
     let _ = state.nats.publish(&format!("user.{}.presence", user_id), &presence_event).await;
+    for (server_id, _, _, _, _) in &servers {
+        let _ = state.nats.publish(&format!("server.{}.events", server_id), &presence_event).await;
+    }
 
     Ok((session, handles))
 }
@@ -492,6 +500,21 @@ async fn handle_presence_update(
             .nats
             .publish(&format!("user.{}.presence", session.user_id), &event)
             .await;
+
+        // Also broadcast to all servers the user is in
+        let servers = sqlx::query_scalar::<_, i64>(
+            "SELECT server_id FROM server_members WHERE user_id = $1",
+        )
+        .bind(session.user_id)
+        .fetch_all(&state.db.pg)
+        .await
+        .unwrap_or_default();
+        for server_id in servers {
+            let _ = state
+                .nats
+                .publish(&format!("server.{}.events", server_id), &event)
+                .await;
+        }
     }
 }
 

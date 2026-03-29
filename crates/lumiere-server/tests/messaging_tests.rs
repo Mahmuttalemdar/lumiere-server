@@ -80,21 +80,34 @@ async fn create_dm_channel(app: &TestApp, token: &str, recipient_id: i64) -> i64
 }
 
 /// Add a second user to a server so they become a member.
-/// Creates an invite, then has the second user join.
+/// Creates an invite via the server's first text channel, then has the second user join.
 async fn add_member_to_server(
     app: &TestApp,
     owner_token: &str,
     member_token: &str,
     server_id: i64,
 ) {
-    // Create an invite
+    // Get the server's first channel to create an invite
+    let res = app
+        .get(owner_token, &format!("/api/v1/servers/{}/channels", server_id))
+        .await;
+    assert_eq!(res.status(), 200, "get channels failed");
+    let channels: Vec<serde_json::Value> = res.json().await.unwrap();
+    let channel_id = channels
+        .first()
+        .expect("server should have at least one channel")["id"]
+        .as_str()
+        .unwrap();
+
+    // Create an invite via the channel
     let res = app
         .post(
             owner_token,
-            &format!("/api/v1/servers/{}/invites", server_id),
+            &format!("/api/v1/channels/{}/invites", channel_id),
             json!({}),
         )
         .await;
+    assert!(res.status() == 200 || res.status() == 201, "create invite failed: {}", res.status());
     let body: serde_json::Value = res.json().await.unwrap();
     let code = body["code"].as_str().unwrap();
 

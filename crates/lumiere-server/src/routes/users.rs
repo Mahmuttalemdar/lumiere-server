@@ -130,11 +130,24 @@ async fn get_user(
     }))
 }
 
+/// Deserialize a field that distinguishes between absent, null, and present values.
+/// - absent → `None` (field not in JSON)
+/// - null → `Some(None)` (field is explicitly null)
+/// - "value" → `Some(Some("value"))`
+fn deserialize_optional_nullable<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateProfileRequest {
     #[validate(length(min = 2, max = 32))]
     pub username: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub avatar: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub banner: Option<Option<String>>,
     #[validate(length(max = 190))]
     pub bio: Option<String>,
@@ -728,6 +741,7 @@ async fn get_dm_channels(
 #[derive(Debug, Deserialize)]
 pub struct CreateDmRequest {
     pub recipient_id: Option<i64>,
+    #[serde(alias = "recipient_ids")]
     pub recipients: Option<Vec<i64>>,
 }
 

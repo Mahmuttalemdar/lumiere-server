@@ -52,13 +52,21 @@ async fn try_read_message(rx: &mut WsRecv) -> Option<serde_json::Value> {
 }
 
 /// Expect the connection to close (receive Close frame or stream end) within the timeout.
+/// Drains any pending non-close messages (e.g., HeartbeatAcks) before checking.
 async fn expect_close(rx: &mut WsRecv, dur: Duration) -> bool {
-    match timeout(dur, rx.next()).await {
-        Ok(None) => true,                           // stream ended
-        Ok(Some(Ok(Message::Close(_)))) => true,    // close frame
-        Ok(Some(Err(_))) => true,                   // connection error
-        Err(_) => false,                            // timeout, still open
-        Ok(Some(Ok(_))) => false,                   // got a non-close message
+    let deadline = tokio::time::Instant::now() + dur;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return false; // timeout, still open
+        }
+        match timeout(remaining, rx.next()).await {
+            Ok(None) => return true,                        // stream ended
+            Ok(Some(Ok(Message::Close(_)))) => return true, // close frame
+            Ok(Some(Err(_))) => return true,                // connection error
+            Err(_) => return false,                         // timeout, still open
+            Ok(Some(Ok(_))) => continue,                    // non-close message, keep draining
+        }
     }
 }
 
@@ -446,8 +454,7 @@ async fn test_ws_receive_relationship_add() {
         &token1,
         "/api/v1/users/@me/relationships",
         serde_json::json!({
-            "user_id": user_id2.to_string(),
-            "type": 1
+            "user_id": user_id2
         }),
     ).await;
     assert!(res.status().is_success(), "Friend request failed: {}", res.status());

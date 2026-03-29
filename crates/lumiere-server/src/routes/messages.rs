@@ -429,8 +429,15 @@ async fn send_message(
         "server_id": server_id,
         "message": serde_json::to_value(&response).unwrap_or_default(),
     });
+    // Publish to channel-specific subject (for DM channel subscriptions)
     if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
         tracing::warn!(error = %e, "Failed to publish NATS event");
+    }
+    // Also publish to server subject so gateway subscribers on server.{id}.> receive it
+    if let Some(sid) = server_id {
+        if let Err(e) = state.nats.publish(&format!("server.{}.events", sid), &event).await {
+            tracing::warn!(error = %e, "Failed to publish server NATS event");
+        }
     }
     if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
         tracing::warn!(error = %e, "Failed to publish durable NATS event");

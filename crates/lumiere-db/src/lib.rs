@@ -169,7 +169,7 @@ impl Database {
         let pg = PgPoolOptions::new()
             .max_connections(config.database.max_connections)
             .min_connections(config.database.min_connections)
-            .acquire_timeout(Duration::from_secs(3))
+            .acquire_timeout(Duration::from_secs(10))
             .idle_timeout(Duration::from_secs(600))
             .max_lifetime(Duration::from_secs(1800))
             .connect(&config.database.url)

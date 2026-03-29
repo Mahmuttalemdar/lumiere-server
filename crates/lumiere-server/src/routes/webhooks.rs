@@ -466,6 +466,14 @@ async fn create_command(
     Path(app_id): Path<i64>,
     Json(body): Json<CreateCommandRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    // Validate command name length (Discord-style: 1–32 characters)
+    if body.name.is_empty() || body.name.len() > 32 {
+        return Err(AppError::BadRequest("Command name must be between 1 and 32 characters".into()));
+    }
+    if body.description.len() > 100 {
+        return Err(AppError::BadRequest("Command description must be 100 characters or less".into()));
+    }
+
     // Verify ownership
     let exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM applications WHERE id = $1 AND owner_id = $2)",

@@ -4,8 +4,8 @@ port = 0  # random port for testing
 
 [database]
 url = "postgres://lumiere:lumiere_test@localhost:15432/lumiere_test"
-max_connections = 10
-min_connections = 1
+max_connections = 20
+min_connections = 5
 
 [scylla]
 nodes = ["127.0.0.1:19042"]

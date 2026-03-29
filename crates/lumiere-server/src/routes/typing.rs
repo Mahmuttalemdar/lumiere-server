@@ -39,7 +39,7 @@ async fn send_typing(
     auth: AuthUser,
     Path(channel_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
+    let server_id = check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
 
     // Rate limit: 1 per 10 seconds
     let mut conn = state.redis.clone();
@@ -66,8 +66,15 @@ async fn send_typing(
         "user_id": auth.id,
         "timestamp": chrono::Utc::now().timestamp(),
     });
+    // Publish to channel subject (for DM subscriptions)
     if let Err(e) = state.nats.publish(&format!("channel.{}.typing", channel_id), &event).await {
         tracing::warn!(error = %e, "Failed to publish NATS event");
+    }
+    // Also publish to server subject for gateway subscribers
+    if let Some(sid) = server_id {
+        if let Err(e) = state.nats.publish(&format!("server.{}.events", sid), &event).await {
+            tracing::warn!(error = %e, "Failed to publish server NATS event");
+        }
     }
 
     Ok(StatusCode::NO_CONTENT)

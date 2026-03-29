@@ -84,7 +84,7 @@ pub struct RateLimitResult {
 pub fn global_limit() -> RateLimitConfig {
     RateLimitConfig {
         key_prefix: "rl:global".into(),
-        max_requests: 50,
+        max_requests: 120,
         window_seconds: 1,
     }
 }

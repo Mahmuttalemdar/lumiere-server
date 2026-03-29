@@ -171,30 +171,40 @@ pub async fn get_test_app() -> &'static TestApp {
         // Load test config
         let config = AppConfig::load().expect("Failed to load test config");
 
-        // Build app state
-        let state = build_app_state(config).await.expect("Failed to build test app state");
-
-        // Clean database for test isolation
-        clean_database(&state).await;
-
-        // Build router
-        let app = build_router(state.clone());
-
         // Bind to random port using std::net (not tokio) so we can read the address
         let std_listener = std::net::TcpListener::bind("127.0.0.1:0")
             .expect("Failed to bind test server");
         let addr = std_listener.local_addr().unwrap().to_string();
         std_listener.set_nonblocking(true).unwrap();
 
-        // Start server in a dedicated thread with its own runtime
-        // (each #[tokio::test] creates a new runtime, but we need the server to outlive all tests)
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let listener = tokio::net::TcpListener::from_std(std_listener).unwrap();
-                axum::serve(listener, app).await.ok();
-            });
-        });
+        // Build app state and start server on a single long-lived runtime.
+        // This is critical: the PgPool's background connection management tasks
+        // are bound to the tokio runtime that created them. If we created the pool
+        // on the test's ephemeral runtime (which #[tokio::test] drops after each test),
+        // connections would leak. By creating everything on the server's dedicated
+        // runtime, the pool stays healthy for the entire test run.
+        let (state, addr) = {
+            let addr_clone = addr.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let state = rt.block_on(async {
+                    let state = build_app_state(config).await.expect("Failed to build test app state");
+                    clean_database(&state).await;
+                    state
+                });
+                let app = build_router(state.clone());
+                // Spawn the server as a background task on this runtime
+                rt.spawn(async move {
+                    let listener = tokio::net::TcpListener::from_std(std_listener).unwrap();
+                    axum::serve(listener, app).await.ok();
+                });
+                // Leak the runtime so it lives forever (server thread must outlive all tests)
+                std::mem::forget(rt);
+                (state, addr_clone)
+            })
+            .join()
+            .expect("Server thread panicked during initialization")
+        };
 
         // Wait for server to be ready
         let client = reqwest::Client::new();
