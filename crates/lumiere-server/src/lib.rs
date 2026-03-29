@@ -22,6 +22,7 @@ use tower_http::{
     trace::TraceLayer,
 };
 
+use middleware::rate_limit::global_rate_limit_middleware;
 use middleware::security::security_headers_middleware;
 
 pub struct AppState {
@@ -45,9 +46,10 @@ impl AuthState for AppState {
 
 /// Build the full application state from config
 pub async fn build_app_state(config: AppConfig) -> anyhow::Result<Arc<AppState>> {
-    let db = Database::connect(&config).await?;
+    let mut db = Database::connect(&config).await?;
     db.run_pg_migrations().await?;
     db.run_scylla_migrations(&config).await?;
+    db.prepare_all().await?;
 
     let redis_client = redis::Client::open(config.redis.url.as_str())?;
     let redis = redis::aio::ConnectionManager::new(redis_client).await?;
@@ -190,8 +192,21 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .nest("/api/v1/webhooks", routes::webhooks::webhook_exec_router())
         .nest("/api/v1/applications", routes::webhooks::applications_router())
         .nest("/api/v1/servers", routes::roles::router())
+        // Attachment upload route with 50 MB body limit
+        .nest(
+            "/api/v1/channels",
+            routes::attachments::upload_router()
+                .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024)),
+        )
+        // Attachment download route (no special body limit needed)
+        .nest("/api/v1/attachments", routes::attachments::download_router())
         // Default request body size limit: 1 MB
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
+        // Global rate limiting (token bucket via Redis)
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            global_rate_limit_middleware,
+        ))
         // Security headers on every response
         .layer(axum_middleware::from_fn(security_headers_middleware))
         .layer(TraceLayer::new_for_http())

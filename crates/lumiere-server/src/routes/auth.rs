@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+use axum::{extract::{FromRequest, State}, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
 use lumiere_auth::{
     jwt,
     middleware::AuthUser,
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use validator::Validate;
 
+use crate::middleware::rate_limit;
 use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -171,8 +172,23 @@ async fn register(
 
 async fn login(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<LoginRequest>,
+    req: axum::extract::Request,
 ) -> Result<impl IntoResponse, AppError> {
+    // Extract client IP before consuming the request body
+    let client_ip = rate_limit::extract_client_ip(&req);
+
+    // Check if IP is blocked due to repeated login failures
+    let mut redis = state.redis.clone();
+    if rate_limit::is_login_blocked(&mut redis, &client_ip).await? {
+        return Err(AppError::RateLimited { retry_after: 1800 });
+    }
+
+    // Parse request body
+    let body: LoginRequest = axum::Json::from_request(req, &state)
+        .await
+        .map_err(|_| AppError::BadRequest("Invalid request body".into()))?
+        .0;
+
     let email = body.email.to_lowercase().trim().to_string();
 
     // Find user
@@ -183,8 +199,15 @@ async fn login(
     .fetch_optional(&state.db.pg)
     .await?;
 
-    let (user_id_raw, username, password_hash, avatar, bio, created_at) = row
-        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
+    let (user_id_raw, username, password_hash, avatar, bio, created_at) = match row {
+        Some(r) => r,
+        None => {
+            // Record failure even for non-existent users to prevent enumeration
+            let mut redis = state.redis.clone();
+            let _ = rate_limit::record_login_failure(&mut redis, &client_ip).await;
+            return Err(AppError::Unauthorized("Invalid email or password".into()));
+        }
+    };
 
     let user_id = lumiere_models::snowflake::Snowflake::from(user_id_raw);
 
@@ -193,8 +216,14 @@ async fn login(
         .map_err(AppError::Internal)?;
 
     if !valid {
+        let mut redis = state.redis.clone();
+        let _ = rate_limit::record_login_failure(&mut redis, &client_ip).await;
         return Err(AppError::Unauthorized("Invalid email or password".into()));
     }
+
+    // Successful login — clear any accumulated failures
+    let mut redis = state.redis.clone();
+    let _ = rate_limit::clear_login_failures(&mut redis, &client_ip).await;
 
     // Generate tokens
     let (access_token, _) =

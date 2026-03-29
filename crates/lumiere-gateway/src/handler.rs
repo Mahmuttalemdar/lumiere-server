@@ -27,6 +27,8 @@ const HEARTBEAT_TIMEOUT_MS: u64 = 61875;
 const MAX_COMMANDS_PER_MINUTE: u32 = 120;
 /// Session buffer TTL in Redis (5 minutes)
 const SESSION_BUFFER_TTL: i64 = 300;
+/// Bounded channel capacity for outbound gateway messages
+const OUTBOUND_CHANNEL_CAPACITY: usize = 1024;
 
 /// Shared state needed by the gateway handler
 pub struct GatewayState {
@@ -56,8 +58,8 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
         }
     }
 
-    // Create outbound channel
-    let (tx, mut rx) = mpsc::unbounded_channel::<GatewayMessage>();
+    // Create bounded outbound channel to apply backpressure
+    let (tx, mut rx) = mpsc::channel::<GatewayMessage>(OUTBOUND_CHANNEL_CAPACITY);
 
     // Spawn sender task
     let sender_task = tokio::spawn(async move {
@@ -113,7 +115,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
         let gateway_msg: GatewayMessage = match serde_json::from_str(&text) {
             Ok(m) => m,
             Err(_) => {
-                let _ = tx.send(GatewayMessage::invalid_session(false));
+                let _ = tx.try_send(GatewayMessage::invalid_session(false));
                 break;
             }
         };
@@ -128,7 +130,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                 let payload: IdentifyPayload = match gateway_msg.d.and_then(|d| serde_json::from_value(d).ok()) {
                     Some(p) => p,
                     None => {
-                        let _ = tx.send(GatewayMessage::invalid_session(false));
+                        let _ = tx.try_send(GatewayMessage::invalid_session(false));
                         break;
                     }
                 };
@@ -139,7 +141,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                         nats_handles = handles;
                     }
                     Err(_) => {
-                        let _ = tx.send(GatewayMessage::invalid_session(false));
+                        let _ = tx.try_send(GatewayMessage::invalid_session(false));
                         break;
                     }
                 }
@@ -162,14 +164,14 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                         .query_async(&mut conn)
                         .await;
                 }
-                let _ = tx.send(GatewayMessage::heartbeat_ack());
+                let _ = tx.try_send(GatewayMessage::heartbeat_ack());
             }
 
             OpCode::Resume => {
                 let payload: ResumePayload = match gateway_msg.d.and_then(|d| serde_json::from_value(d).ok()) {
                     Some(p) => p,
                     None => {
-                        let _ = tx.send(GatewayMessage::invalid_session(false));
+                        let _ = tx.try_send(GatewayMessage::invalid_session(false));
                         break;
                     }
                 };
@@ -184,7 +186,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                         nats_handles = handles;
                     }
                     Err(_) => {
-                        let _ = tx.send(GatewayMessage::invalid_session(false));
+                        let _ = tx.try_send(GatewayMessage::invalid_session(false));
                         break;
                     }
                 }
@@ -255,7 +257,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
 async fn handle_identify(
     state: &GatewayState,
     payload: &IdentifyPayload,
-    tx: mpsc::UnboundedSender<GatewayMessage>,
+    tx: mpsc::Sender<GatewayMessage>,
 ) -> Result<(Arc<GatewaySession>, Vec<tokio::task::JoinHandle<()>>), anyhow::Error> {
     // Validate token
     let claims = jwt::verify_token(&payload.token, &state.jwt_secret)?;
@@ -339,7 +341,7 @@ async fn handle_identify(
     });
 
     let seq = SessionManager::next_sequence(&session);
-    let _ = tx.send(GatewayMessage::dispatch("READY", seq, ready_data));
+    let _ = tx.try_send(GatewayMessage::dispatch("READY", seq, ready_data));
 
     // Subscribe to NATS subjects and forward events
     let handles = spawn_nats_listener(state, &session, &servers, &dms).await;
@@ -358,7 +360,7 @@ async fn handle_identify(
 async fn handle_resume(
     state: &GatewayState,
     payload: &ResumePayload,
-    tx: mpsc::UnboundedSender<GatewayMessage>,
+    tx: mpsc::Sender<GatewayMessage>,
 ) -> Result<(Arc<GatewaySession>, Vec<tokio::task::JoinHandle<()>>), anyhow::Error> {
     // Validate token
     let claims = jwt::verify_token(&payload.token, &state.jwt_secret)?;
@@ -409,9 +411,25 @@ async fn handle_resume(
 
     state.session_manager.register(Arc::clone(&session));
 
+    // Replay missed events before sending RESUMED
+    let mut replay_conn = state.redis.clone();
+    let replayed = replay_events(
+        &mut replay_conn,
+        &payload.session_id,
+        payload.sequence,
+        &tx,
+    )
+    .await;
+    tracing::debug!(
+        session_id = %payload.session_id,
+        last_sequence = payload.sequence,
+        replayed,
+        "Replayed missed events on resume"
+    );
+
     // Send RESUMED event
     let seq = SessionManager::next_sequence(&session);
-    let _ = tx.send(GatewayMessage::dispatch("RESUMED", seq, serde_json::json!({})));
+    let _ = tx.try_send(GatewayMessage::dispatch("RESUMED", seq, serde_json::json!({})));
 
     // Re-subscribe to NATS
     let servers = sqlx::query_as::<_, (i64, String, Option<String>, i64, i32)>(
@@ -477,6 +495,68 @@ async fn handle_presence_update(
     }
 }
 
+/// Buffer a dispatch event in Redis for session resume/replay.
+/// Only buffers Dispatch events. Keeps the last 1000 events with a 5-minute TTL.
+async fn buffer_event(
+    redis: &mut redis::aio::ConnectionManager,
+    session_id: &str,
+    event: &GatewayMessage,
+) {
+    if event.op != OpCode::Dispatch {
+        return;
+    }
+    let key = format!("gateway_events:{}", session_id);
+    if let Ok(json) = serde_json::to_string(event) {
+        let _: Result<(), _> = redis::pipe()
+            .cmd("RPUSH")
+            .arg(&key)
+            .arg(&json)
+            .cmd("LTRIM")
+            .arg(&key)
+            .arg(-1000i64)
+            .arg(-1i64)
+            .cmd("EXPIRE")
+            .arg(&key)
+            .arg(SESSION_BUFFER_TTL)
+            .query_async(redis)
+            .await;
+    }
+}
+
+/// Replay missed events from Redis on session resume.
+/// Returns the number of events replayed.
+async fn replay_events(
+    redis: &mut redis::aio::ConnectionManager,
+    session_id: &str,
+    last_sequence: u64,
+    tx: &mpsc::Sender<GatewayMessage>,
+) -> u64 {
+    let key = format!("gateway_events:{}", session_id);
+    let events: Vec<String> = redis::cmd("LRANGE")
+        .arg(&key)
+        .arg(0i64)
+        .arg(-1i64)
+        .query_async(redis)
+        .await
+        .unwrap_or_default();
+
+    let mut replayed = 0u64;
+    for json in events {
+        if let Ok(event) = serde_json::from_str::<GatewayMessage>(&json) {
+            if let Some(seq) = event.s {
+                if seq > last_sequence {
+                    let _ = tx.try_send(event);
+                    replayed += 1;
+                }
+            }
+        }
+    }
+
+    // Clean up the buffer after replay
+    let _: Result<(), _> = redis::cmd("DEL").arg(&key).query_async(redis).await;
+    replayed
+}
+
 /// Spawn NATS subscription listeners that forward events to the WebSocket
 async fn spawn_nats_listener(
     state: &GatewayState,
@@ -488,16 +568,31 @@ async fn spawn_nats_listener(
     let mut handles = Vec::new();
 
     // Subscribe to user events
-    handles.push(subscribe_and_forward(&state.nats.client, &format!("user.{}.>", user_id), session));
+    handles.push(subscribe_and_forward(
+        &state.nats.client,
+        &format!("user.{}.>", user_id),
+        session,
+        state.redis.clone(),
+    ));
 
     // Subscribe to server events
     for (server_id, _, _, _, _) in servers {
-        handles.push(subscribe_and_forward(&state.nats.client, &format!("server.{}.>", server_id), session));
+        handles.push(subscribe_and_forward(
+            &state.nats.client,
+            &format!("server.{}.>", server_id),
+            session,
+            state.redis.clone(),
+        ));
     }
 
     // Subscribe to DM channel events
     for (channel_id, _) in dms {
-        handles.push(subscribe_and_forward(&state.nats.client, &format!("channel.{}.>", channel_id), session));
+        handles.push(subscribe_and_forward(
+            &state.nats.client,
+            &format!("channel.{}.>", channel_id),
+            session,
+            state.redis.clone(),
+        ));
     }
 
     handles
@@ -507,10 +602,12 @@ fn subscribe_and_forward(
     client: &async_nats::Client,
     subject: &str,
     session: &Arc<GatewaySession>,
+    redis: redis::aio::ConnectionManager,
 ) -> tokio::task::JoinHandle<()> {
     let client = client.clone();
     let subject = subject.to_string();
     let session = Arc::clone(session);
+    let mut redis = redis;
 
     tokio::spawn(async move {
         let mut subscriber = match client.subscribe(subject).await {
@@ -530,8 +627,12 @@ fn subscribe_and_forward(
             let event_type = data["type"].as_str().unwrap_or("UNKNOWN").to_string();
             let seq = SessionManager::next_sequence(&session);
             let dispatch = GatewayMessage::dispatch(&event_type, seq, data);
-            if session.sender.send(dispatch).is_err() {
-                break; // Connection closed
+
+            // Buffer the event in Redis for potential session resume
+            buffer_event(&mut redis, &session.session_id, &dispatch).await;
+
+            if session.sender.try_send(dispatch).is_err() {
+                break; // Connection closed or channel full
             }
         }
     })

@@ -9,47 +9,55 @@ const FILTER_SUBJECT: &str = "persist.messages.>";
 
 /// Start the read state worker. Pulls MESSAGE_CREATE events from JetStream
 /// and increments unread / mention counts in the read_states table.
-/// Runs until `cancel` is triggered.
+/// Runs until `cancel` is triggered. Automatically restarts on stream
+/// disconnection.
 pub async fn start(state: Arc<AppState>, cancel: CancellationToken) {
-    tracing::info!("Starting read state worker");
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        tracing::info!("Starting read state worker...");
+        match run_consumer(&state, &cancel).await {
+            Ok(()) => return, // graceful shutdown
+            Err(e) => {
+                tracing::error!(error = %e, "Read state worker crashed, restarting in 5s");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
 
-    let consumer = match state
+async fn run_consumer(
+    state: &AppState,
+    cancel: &CancellationToken,
+) -> anyhow::Result<()> {
+    let consumer = state
         .nats
         .create_pull_consumer(STREAM_NAME, CONSUMER_NAME, Some(FILTER_SUBJECT))
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to create read state consumer");
-            return;
-        }
-    };
+        .await?;
 
-    let mut messages = match consumer.messages().await {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to open read state message stream");
-            return;
-        }
-    };
+    let mut messages = consumer.messages().await?;
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
                 tracing::info!("Read state worker shutting down");
-                break;
+                return Ok(());
             }
             msg = messages.next() => {
                 let Some(Ok(msg)) = msg else {
-                    tracing::warn!("Read state message stream ended unexpectedly, restarting in 1s");
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    break;
+                    anyhow::bail!("Read state message stream ended unexpectedly");
                 };
-                if let Err(e) = process_message(&state, &msg).await {
-                    tracing::error!(error = %e, "Read state worker process error");
-                }
-                if let Err(e) = msg.ack().await {
-                    tracing::warn!(error = %e, "Read state worker ack failed");
+                match process_message(state, &msg).await {
+                    Ok(()) => {
+                        if let Err(e) = msg.ack().await {
+                            tracing::warn!(error = %e, "Read state worker ack failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Read state worker process error, will be redelivered");
+                        // Don't ack — NATS will redeliver after ack_wait (30s)
+                    }
                 }
             }
         }

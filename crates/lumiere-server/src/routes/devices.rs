@@ -51,11 +51,24 @@ async fn register_device(
         return Err(AppError::Validation(super::validation_errors(errors)));
     }
 
-    let device_id = state.snowflake.next_id();
-
-    // Access the PG token store through the push service.
-    // We can also directly use the PG pool since we know the schema.
     let pg_store = PgDeviceTokenStore::new(state.db.pg.clone());
+
+    // Enforce a maximum of 10 device tokens per user
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM device_tokens WHERE user_id = $1",
+    )
+    .bind(auth.id)
+    .fetch_one(&state.db.pg)
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("{}", e)))?;
+
+    if count >= 10 {
+        return Err(AppError::BadRequest(
+            "Too many registered devices (maximum 10)".into(),
+        ));
+    }
+
+    let device_id = state.snowflake.next_id();
 
     pg_store
         .register(device_id, auth.id, body.platform, &body.token)
@@ -66,7 +79,7 @@ async fn register_device(
         StatusCode::CREATED,
         Json(DeviceResponse {
             id: device_id,
-            token: body.token,
+            token: mask_token(&body.token),
             platform: body.platform,
         }),
     ))
@@ -88,7 +101,7 @@ async fn list_devices(
         .into_iter()
         .map(|d| DeviceResponse {
             id: d.id.unwrap_or_else(|| Snowflake::new(0)),
-            token: d.token,
+            token: mask_token(&d.token),
             platform: d.platform,
         })
         .collect();
@@ -114,4 +127,13 @@ async fn unregister_device(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Mask a device token so only the first 4 and last 4 characters are visible.
+fn mask_token(token: &str) -> String {
+    if token.len() > 8 {
+        format!("{}...{}", &token[..4], &token[token.len() - 4..])
+    } else {
+        "****".to_string()
+    }
 }

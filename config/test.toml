@@ -23,9 +23,9 @@ url = "http://127.0.0.1:7700"
 api_key = "lumiere_dev_key"
 
 [minio]
-endpoint = "http://127.0.0.1:9000"
+endpoint = "http://127.0.0.1:19000"
 access_key = "lumiere"
-secret_key = "lumiere_dev"
+secret_key = "lumiere_test"
 bucket = "lumiere-test"
 region = "us-east-1"
 use_ssl = false

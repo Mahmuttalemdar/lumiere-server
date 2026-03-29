@@ -213,7 +213,13 @@ impl TokenStoreBackend {
     pub async fn get_tokens(&self, user_id: Snowflake) -> Vec<DeviceToken> {
         match self {
             Self::InMemory(s) => s.get_tokens(user_id).await,
-            Self::Postgres(s) => s.get_tokens(user_id).await.unwrap_or_default(),
+            Self::Postgres(s) => match s.get_tokens(user_id).await {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    tracing::error!(user_id = %user_id.value(), error = %e, "Failed to get device tokens from DB");
+                    Vec::new()
+                }
+            },
         }
     }
 

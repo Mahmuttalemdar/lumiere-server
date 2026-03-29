@@ -83,7 +83,9 @@ impl PgDeviceTokenStore {
         .await
         .map_err(|e| PushError::Internal(anyhow::anyhow!("Failed to get device tokens: {}", e)))?;
 
-        Ok(rows.into_iter().map(|r| r.into()).collect())
+        rows.into_iter()
+            .map(DeviceToken::try_from)
+            .collect::<Result<Vec<_>, _>>()
     }
 
     /// Remove a token by its raw string across all users. Used when APNs/FCM
@@ -116,15 +118,17 @@ struct DeviceTokenRow {
     token: String,
 }
 
-impl From<DeviceTokenRow> for DeviceToken {
-    fn from(row: DeviceTokenRow) -> Self {
-        DeviceToken {
+impl TryFrom<DeviceTokenRow> for DeviceToken {
+    type Error = PushError;
+
+    fn try_from(row: DeviceTokenRow) -> Result<Self, PushError> {
+        Ok(DeviceToken {
             id: Some(Snowflake::new(row.id as u64)),
             token: row.token,
-            platform: platform_from_i16(row.platform),
+            platform: platform_from_i16(row.platform)?,
             user_id: Snowflake::new(row.user_id as u64),
             device_name: None,
-        }
+        })
     }
 }
 
@@ -135,10 +139,13 @@ fn platform_to_i16(platform: Platform) -> i16 {
     }
 }
 
-fn platform_from_i16(value: i16) -> Platform {
+fn platform_from_i16(value: i16) -> Result<Platform, PushError> {
     match value {
-        0 => Platform::Ios,
-        1 => Platform::Android,
-        _ => Platform::Android, // fallback
+        0 => Ok(Platform::Ios),
+        1 => Ok(Platform::Android),
+        other => Err(PushError::Internal(anyhow::anyhow!(
+            "Unknown platform value: {}",
+            other
+        ))),
     }
 }

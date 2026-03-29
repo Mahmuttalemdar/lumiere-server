@@ -11,46 +11,54 @@ const FILTER_SUBJECT: &str = "persist.messages.>";
 
 /// Start the search indexer worker. Pulls messages from JetStream and
 /// indexes/removes them in Meilisearch. Runs until `cancel` is triggered.
+/// Automatically restarts on stream disconnection.
 pub async fn start(state: Arc<AppState>, cancel: CancellationToken) {
-    tracing::info!("Starting search indexer worker");
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        tracing::info!("Starting search indexer worker...");
+        match run_consumer(&state, &cancel).await {
+            Ok(()) => return, // graceful shutdown
+            Err(e) => {
+                tracing::error!(error = %e, "Search indexer crashed, restarting in 5s");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
 
-    let consumer = match state
+async fn run_consumer(
+    state: &AppState,
+    cancel: &CancellationToken,
+) -> anyhow::Result<()> {
+    let consumer = state
         .nats
         .create_pull_consumer(STREAM_NAME, CONSUMER_NAME, Some(FILTER_SUBJECT))
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to create search indexer consumer");
-            return;
-        }
-    };
+        .await?;
 
-    let mut messages = match consumer.messages().await {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to open search indexer message stream");
-            return;
-        }
-    };
+    let mut messages = consumer.messages().await?;
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
                 tracing::info!("Search indexer worker shutting down");
-                break;
+                return Ok(());
             }
             msg = messages.next() => {
                 let Some(Ok(msg)) = msg else {
-                    tracing::warn!("Search indexer message stream ended unexpectedly, restarting in 1s");
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    break;
+                    anyhow::bail!("Search indexer message stream ended unexpectedly");
                 };
-                if let Err(e) = process_message(&state, &msg).await {
-                    tracing::error!(error = %e, "Search indexer process error");
-                }
-                if let Err(e) = msg.ack().await {
-                    tracing::warn!(error = %e, "Search indexer ack failed");
+                match process_message(state, &msg).await {
+                    Ok(()) => {
+                        if let Err(e) = msg.ack().await {
+                            tracing::warn!(error = %e, "Search indexer ack failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Search indexer process error, will be redelivered");
+                        // Don't ack — NATS will redeliver after ack_wait (30s)
+                    }
                 }
             }
         }

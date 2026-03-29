@@ -11,6 +11,11 @@ test-unit:
 
 test-integration:
 	docker compose -f docker-compose.test.yml up -d --wait
+	@echo "Waiting for ScyllaDB..."
+	@for i in $$(seq 1 30); do \
+		docker compose -f docker-compose.test.yml exec -T scylladb-test cqlsh -e "SELECT now() FROM system.local" 2>/dev/null && break; \
+		sleep 5; \
+	done
 	LUMIERE_ENV=test cargo test --tests -p lumiere-server; \
 	EXIT_CODE=$$?; \
 	docker compose -f docker-compose.test.yml down -v; \

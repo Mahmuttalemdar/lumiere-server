@@ -85,9 +85,6 @@ fn row_to_response(r: MsgRow) -> MessageResponse {
     }
 }
 
-const MSG_COLS: &str = "message_id, channel_id, author_id, content, type, flags, edited_at, \
-     pinned, mention_everyone, mentions, mention_roles, embeds, attachments, reference_id, deleted";
-
 /// Extract typed rows from a ScyllaDB query result
 fn extract_msg_rows(result: scylla::transport::query_result::QueryResult) -> Vec<MsgRow> {
     let mut out = Vec::new();
@@ -155,6 +152,7 @@ async fn query_messages(
     limit: usize,
 ) -> Result<Vec<MsgRow>, AppError> {
     let mut results = Vec::new();
+    let ps = state.db.prepared();
 
     if let Some(before_id) = before {
         let snowflake = Snowflake::from(before_id);
@@ -164,13 +162,10 @@ async fn query_messages(
 
         for b in buckets {
             if results.len() >= limit { break; }
-            let remaining = limit - results.len();
-            let qr = state.db.scylla.query_unpaged(
-                format!(
-                    "SELECT {} FROM messages WHERE channel_id = ? AND bucket = ? AND message_id < ? ORDER BY message_id DESC LIMIT {}",
-                    MSG_COLS, remaining
-                ),
-                (channel_id, b, before_id),
+            let remaining = (limit - results.len()) as i32;
+            let qr = state.db.scylla.execute_unpaged(
+                &ps.get_messages_before,
+                (channel_id, b, before_id, remaining),
             ).await.map_err(scylla_err)?;
             results.extend(extract_msg_rows(qr));
         }
@@ -181,13 +176,10 @@ async fn query_messages(
 
         for b in start_bucket..=end_bucket {
             if results.len() >= limit { break; }
-            let remaining = limit - results.len();
-            let qr = state.db.scylla.query_unpaged(
-                format!(
-                    "SELECT {} FROM messages WHERE channel_id = ? AND bucket = ? AND message_id > ? ORDER BY message_id ASC LIMIT {}",
-                    MSG_COLS, remaining
-                ),
-                (channel_id, b, after_id),
+            let remaining = (limit - results.len()) as i32;
+            let qr = state.db.scylla.execute_unpaged(
+                &ps.get_messages_after,
+                (channel_id, b, after_id, remaining),
             ).await.map_err(scylla_err)?;
             results.extend(extract_msg_rows(qr));
         }
@@ -196,13 +188,10 @@ async fn query_messages(
         let min_bucket = (current - 20).max(0); // scan at most 20 buckets (~200 days)
         for b in (min_bucket..=current).rev() {
             if results.len() >= limit { break; }
-            let remaining = limit - results.len();
-            let qr = state.db.scylla.query_unpaged(
-                format!(
-                    "SELECT {} FROM messages WHERE channel_id = ? AND bucket = ? ORDER BY message_id DESC LIMIT {}",
-                    MSG_COLS, remaining
-                ),
-                (channel_id, b),
+            let remaining = (limit - results.len()) as i32;
+            let qr = state.db.scylla.execute_unpaged(
+                &ps.get_messages_latest,
+                (channel_id, b, remaining),
             ).await.map_err(scylla_err)?;
             results.extend(extract_msg_rows(qr));
         }
@@ -258,8 +247,8 @@ async fn get_messages(
         // Fetch the target message itself
         let target_snowflake = Snowflake::from(around_id);
         let target_bucket = bucket::bucket_from_snowflake(target_snowflake);
-        let target_qr = state.db.scylla.query_unpaged(
-            format!("SELECT {} FROM messages WHERE channel_id = ? AND bucket = ? AND message_id = ?", MSG_COLS),
+        let target_qr = state.db.scylla.execute_unpaged(
+            &state.db.prepared().get_message_by_id,
             (channel_id, target_bucket, around_id),
         ).await.map_err(scylla_err)?;
         let target_rows = extract_msg_rows(target_qr);
@@ -286,8 +275,8 @@ async fn get_message(
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
-    let qr = state.db.scylla.query_unpaged(
-        format!("SELECT {} FROM messages WHERE channel_id = ? AND bucket = ? AND message_id = ?", MSG_COLS),
+    let qr = state.db.scylla.execute_unpaged(
+        &state.db.prepared().get_message_by_id,
         (channel_id, b, message_id),
     ).await.map_err(scylla_err)?;
 
@@ -393,10 +382,8 @@ async fn send_message(
     let embeds_json = body.embeds.as_ref().map(|e| e.to_string());
     let attachments_json = body.attachments.as_ref().map(|a| a.to_string());
 
-    state.db.scylla.query_unpaged(
-        "INSERT INTO messages (channel_id, bucket, message_id, author_id, content, type, flags, \
-         pinned, mention_everyone, mentions, mention_roles, embeds, attachments, reference_id, deleted) \
-         VALUES (?, ?, ?, ?, ?, ?, 0, false, ?, ?, ?, ?, ?, ?, false)",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().insert_message,
         (
             channel_id, b, message_id.value() as i64, auth.id.value() as i64,
             body.content.as_deref(), message_type, mention_everyone,
@@ -472,8 +459,8 @@ async fn edit_message(
     let b = bucket::bucket_from_snowflake(snowflake);
 
     // Get author
-    let qr = state.db.scylla.query_unpaged(
-        "SELECT author_id FROM messages WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+    let qr = state.db.scylla.execute_unpaged(
+        &state.db.prepared().get_message_author,
         (channel_id, b, message_id),
     ).await.map_err(scylla_err)?;
 
@@ -500,16 +487,16 @@ async fn edit_message(
     let edited_ts = CqlTimestamp(chrono::Utc::now().timestamp_millis());
 
     if let Some(ref content) = body.content {
-        state.db.scylla.query_unpaged(
-            "UPDATE messages SET content = ?, edited_at = ? WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+        state.db.scylla.execute_unpaged(
+            &state.db.prepared().update_content,
             (content.as_str(), edited_ts, channel_id, b, message_id),
         ).await.map_err(scylla_err)?;
     }
 
     if let Some(ref embeds) = body.embeds {
         let embeds_str = embeds.to_string();
-        state.db.scylla.query_unpaged(
-            "UPDATE messages SET embeds = ?, edited_at = ? WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+        state.db.scylla.execute_unpaged(
+            &state.db.prepared().update_embeds,
             (embeds_str.as_str(), edited_ts, channel_id, b, message_id),
         ).await.map_err(scylla_err)?;
     }
@@ -537,8 +524,8 @@ async fn delete_message(
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
-    let qr = state.db.scylla.query_unpaged(
-        "SELECT author_id FROM messages WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+    let qr = state.db.scylla.execute_unpaged(
+        &state.db.prepared().get_message_author,
         (channel_id, b, message_id),
     ).await.map_err(scylla_err)?;
 
@@ -556,8 +543,8 @@ async fn delete_message(
         check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
     }
 
-    state.db.scylla.query_unpaged(
-        "UPDATE messages SET deleted = true WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().soft_delete,
         (channel_id, b, message_id),
     ).await.map_err(scylla_err)?;
 
@@ -595,8 +582,8 @@ async fn bulk_delete(
     for &msg_id in &body.messages {
         let snowflake = Snowflake::from(msg_id);
         let b = bucket::bucket_from_snowflake(snowflake);
-        if let Err(e) = state.db.scylla.query_unpaged(
-            "UPDATE messages SET deleted = true WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+        if let Err(e) = state.db.scylla.execute_unpaged(
+            &state.db.prepared().soft_delete,
             (channel_id, b, msg_id),
         ).await {
             tracing::warn!(message_id = msg_id, error = %e, "Failed to soft-delete message");
@@ -628,8 +615,8 @@ async fn get_pins(
 ) -> Result<impl IntoResponse, AppError> {
     check_channel_permission(&state, channel_id, auth.id, Permissions::VIEW_CHANNEL).await?;
 
-    let qr = state.db.scylla.query_unpaged(
-        "SELECT message_id FROM pins WHERE channel_id = ?",
+    let qr = state.db.scylla.execute_unpaged(
+        &state.db.prepared().get_pin_ids,
         (channel_id,),
     ).await.map_err(scylla_err)?;
 
@@ -653,8 +640,8 @@ async fn get_pins(
     let mut messages = Vec::new();
     for (b, ids) in &by_bucket {
         for msg_id in ids {
-            let qr = state.db.scylla.query_unpaged(
-                format!("SELECT {} FROM messages WHERE channel_id = ? AND bucket = ? AND message_id = ?", MSG_COLS),
+            let qr = state.db.scylla.execute_unpaged(
+                &state.db.prepared().get_message_by_id,
                 (channel_id, *b, *msg_id),
             ).await.map_err(scylla_err)?;
             let rows = extract_msg_rows(qr);
@@ -675,8 +662,8 @@ async fn pin_message(
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
     // Max 50 pins
-    let qr = state.db.scylla.query_unpaged(
-        "SELECT COUNT(*) FROM pins WHERE channel_id = ?",
+    let qr = state.db.scylla.execute_unpaged(
+        &state.db.prepared().count_pins,
         (channel_id,),
     ).await.map_err(scylla_err)?;
 
@@ -694,8 +681,8 @@ async fn pin_message(
     let b = bucket::bucket_from_snowflake(snowflake);
 
     // Verify the message exists and is not deleted
-    let qr = state.db.scylla.query_unpaged(
-        "SELECT message_id, deleted FROM messages WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+    let qr = state.db.scylla.execute_unpaged(
+        &state.db.prepared().check_message_exists,
         (channel_id, b, message_id),
     ).await.map_err(scylla_err)?;
 
@@ -711,14 +698,14 @@ async fn pin_message(
         return Err(AppError::NotFound("Message not found".into()));
     }
 
-    state.db.scylla.query_unpaged(
-        "UPDATE messages SET pinned = true WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().set_pinned,
         (channel_id, b, message_id),
     ).await.map_err(scylla_err)?;
 
     let now = CqlTimestamp(chrono::Utc::now().timestamp_millis());
-    state.db.scylla.query_unpaged(
-        "INSERT INTO pins (channel_id, message_id, pinned_by, pinned_at) VALUES (?, ?, ?, ?)",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().insert_pin,
         (channel_id, message_id, auth.id.value() as i64, now),
     ).await.map_err(scylla_err)?;
 
@@ -740,13 +727,13 @@ async fn unpin_message(
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
-    state.db.scylla.query_unpaged(
-        "UPDATE messages SET pinned = false WHERE channel_id = ? AND bucket = ? AND message_id = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().unset_pinned,
         (channel_id, b, message_id),
     ).await.map_err(scylla_err)?;
 
-    state.db.scylla.query_unpaged(
-        "DELETE FROM pins WHERE channel_id = ? AND message_id = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().delete_pin,
         (channel_id, message_id),
     ).await.map_err(scylla_err)?;
 

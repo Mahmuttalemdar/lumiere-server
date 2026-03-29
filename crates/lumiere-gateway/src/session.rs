@@ -20,7 +20,7 @@ pub struct GatewaySession {
     pub session_id: String,
     pub user_id: Snowflake,
     pub sequence: AtomicU64,
-    pub sender: mpsc::UnboundedSender<GatewayMessage>,
+    pub sender: mpsc::Sender<GatewayMessage>,
     pub last_heartbeat: AtomicU64,
     pub connected_at: std::time::Instant,
 }
@@ -64,12 +64,14 @@ impl SessionManager {
         self.sessions.get(session_id).map(|s| Arc::clone(&s))
     }
 
-    /// Send event to all sessions of a user
+    /// Send event to all sessions of a user.
+    /// Uses `try_send` to avoid blocking — if a session's channel is full,
+    /// the event is dropped for that session (the client is too slow).
     pub fn dispatch_to_user(&self, user_id: u64, msg: GatewayMessage) {
         if let Some(session_ids) = self.user_sessions.get(&user_id) {
             for sid in session_ids.iter() {
                 if let Some(session) = self.sessions.get(sid) {
-                    let _ = session.sender.send(msg.clone());
+                    let _ = session.sender.try_send(msg.clone());
                 }
             }
         }

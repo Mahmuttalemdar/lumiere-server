@@ -21,9 +21,10 @@ pub async fn security_headers_middleware(req: Request, next: Next) -> Response {
         "referrer-policy",
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
+    // camera and microphone allowed for voice/video features
     headers.insert(
         "permissions-policy",
-        HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+        HeaderValue::from_static("geolocation=()"),
     );
     // HSTS — enforce HTTPS
     headers.insert(
@@ -36,6 +37,20 @@ pub async fn security_headers_middleware(req: Request, next: Next) -> Response {
     headers.insert(
         "content-security-policy",
         HeaderValue::from_static("default-src 'none'"),
+    );
+    // Prevent caching of API responses that may contain sensitive data
+    headers.insert(
+        "cache-control",
+        HeaderValue::from_static("no-store"),
+    );
+    // Cross-Origin isolation headers
+    headers.insert(
+        "cross-origin-opener-policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    headers.insert(
+        "cross-origin-resource-policy",
+        HeaderValue::from_static("cross-origin"),
     );
 
     response

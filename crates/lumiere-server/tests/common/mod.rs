@@ -1,6 +1,5 @@
 use lumiere_models::config::AppConfig;
 use lumiere_server::{build_app_state, build_router, AppState};
-use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use tokio::sync::OnceCell as AsyncOnceCell;
 

@@ -110,6 +110,11 @@ async fn upload_attachment(
         .await
         .map_err(|e| AppError::BadRequest(format!("Failed to read file: {}", e)))?;
 
+    // Reject empty files
+    if data.is_empty() {
+        return Err(AppError::BadRequest("File is empty".into()));
+    }
+
     // Validate magic bytes match the claimed content type
     validate_content_magic_bytes(&data, &content_type)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
@@ -211,6 +216,20 @@ async fn download_attachment(
 
     if let Some((server_id,)) = server_row {
         require_permissions(&state, server_id, auth.id, Permissions::VIEW_CHANNEL).await?;
+    } else {
+        // DM channel — verify user is a recipient
+        let is_recipient = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM dm_recipients WHERE channel_id = $1 AND user_id = $2)",
+        )
+        .bind(channel_id)
+        .bind(auth.id)
+        .fetch_one(&state.db.pg)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+        if !is_recipient {
+            return Err(AppError::Forbidden("Access denied".into()));
+        }
     }
 
     // Generate a presigned URL (1 hour expiry)
@@ -220,21 +239,25 @@ async fn download_attachment(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
+    // Sanitize filename for Content-Disposition header to prevent header injection
+    let safe_filename = filename
+        .replace('"', "'")
+        .replace(['\n', '\r'], "");
+
     // Determine Content-Disposition: inline for safe types, attachment for others
     let disposition = if is_inline_safe(&content_type) {
-        format!("inline; filename=\"{}\"", filename)
+        format!("inline; filename=\"{}\"", safe_filename)
     } else {
-        format!("attachment; filename=\"{}\"", filename)
+        format!("attachment; filename=\"{}\"", safe_filename)
     };
 
-    // Redirect to the presigned URL with cache headers
+    // Redirect to the presigned URL with cache headers.
+    // max-age matches the presigned URL expiry (1 hour) since the redirect
+    // target (presigned URL) expires — caching the redirect longer is wrong.
     let response = Response::builder()
         .status(StatusCode::FOUND)
         .header(header::LOCATION, &url)
-        .header(
-            header::CACHE_CONTROL,
-            "public, max-age=31536000, immutable",
-        )
+        .header(header::CACHE_CONTROL, "public, max-age=3600")
         .header(header::CONTENT_DISPOSITION, disposition)
         .body(Body::empty())
         .unwrap();

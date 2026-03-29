@@ -49,7 +49,11 @@ export function setup() {
             `storm_${Date.now()}_${i}@test.com`,
             'testpassword123'
         );
-        users.push(user);
+        if (user) users.push(user);
+    }
+
+    if (users.length === 0) {
+        throw new Error('No users could be registered for storm test');
     }
 
     // Create a server and channel for HTTP storm
@@ -97,7 +101,7 @@ export function wsStorm(data) {
     const user = data.users[__VU % data.users.length];
     const token = user.access_token;
 
-    const url = `${WS_URL}/api/v1/gateway?token=${token}`;
+    const url = `${WS_URL}/gateway`;
 
     const res = ws.connect(url, {}, function (socket) {
         socket.on('open', function () {

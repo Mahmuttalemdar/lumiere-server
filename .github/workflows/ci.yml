@@ -58,11 +58,13 @@ jobs:
           for i in $(seq 1 30); do
             if docker compose -f docker-compose.test.yml exec -T scylladb-test cqlsh -e "SELECT now() FROM system.local" 2>/dev/null; then
               echo "ScyllaDB is ready."
-              break
+              exit 0
             fi
             echo "Attempt $i/30 - waiting..."
             sleep 5
           done
+          echo "ScyllaDB never became ready"
+          exit 1
 
       - name: Run integration tests
         run: cargo test --tests -p lumiere-server

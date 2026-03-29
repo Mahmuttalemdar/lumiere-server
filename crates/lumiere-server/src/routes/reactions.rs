@@ -62,8 +62,8 @@ async fn add_reaction(
     check_channel_permission(&state, channel_id, auth.id, Permissions::ADD_REACTIONS).await?;
 
     let now = CqlTimestamp(chrono::Utc::now().timestamp_millis());
-    state.db.scylla.query_unpaged(
-        "INSERT INTO reactions (channel_id, message_id, emoji, user_id, created_at) VALUES (?, ?, ?, ?, ?)",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().insert_reaction,
         (channel_id, message_id, emoji.as_str(), auth.id.value() as i64, now),
     )
     .await
@@ -93,8 +93,8 @@ async fn remove_own_reaction(
     }
     check_channel_permission(&state, channel_id, auth.id, Permissions::VIEW_CHANNEL).await?;
 
-    state.db.scylla.query_unpaged(
-        "DELETE FROM reactions WHERE channel_id = ? AND message_id = ? AND emoji = ? AND user_id = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().delete_reaction,
         (channel_id, message_id, emoji.as_str(), auth.id.value() as i64),
     )
     .await
@@ -124,8 +124,8 @@ async fn remove_user_reaction(
     }
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
-    state.db.scylla.query_unpaged(
-        "DELETE FROM reactions WHERE channel_id = ? AND message_id = ? AND emoji = ? AND user_id = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().delete_reaction,
         (channel_id, message_id, emoji.as_str(), user_id),
     )
     .await
@@ -166,22 +166,16 @@ async fn get_reactors(
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
 
     let qr = if let Some(after_id) = query.after {
-        state.db.scylla.query_unpaged(
-            format!(
-                "SELECT user_id FROM reactions WHERE channel_id = ? AND message_id = ? AND emoji = ? AND user_id > ? LIMIT {}",
-                limit
-            ),
-            (channel_id, message_id, emoji.as_str(), after_id),
+        state.db.scylla.execute_unpaged(
+            &state.db.prepared().get_reactors_after,
+            (channel_id, message_id, emoji.as_str(), after_id, limit),
         )
         .await
         .map_err(scylla_err)?
     } else {
-        state.db.scylla.query_unpaged(
-            format!(
-                "SELECT user_id FROM reactions WHERE channel_id = ? AND message_id = ? AND emoji = ? LIMIT {}",
-                limit
-            ),
-            (channel_id, message_id, emoji.as_str()),
+        state.db.scylla.execute_unpaged(
+            &state.db.prepared().get_reactors,
+            (channel_id, message_id, emoji.as_str(), limit),
         )
         .await
         .map_err(scylla_err)?
@@ -235,8 +229,8 @@ async fn remove_all_reactions(
 ) -> Result<impl IntoResponse, AppError> {
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
-    state.db.scylla.query_unpaged(
-        "DELETE FROM reactions WHERE channel_id = ? AND message_id = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().delete_all_reactions,
         (channel_id, message_id),
     )
     .await
@@ -264,8 +258,8 @@ async fn remove_all_emoji_reactions(
     }
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
-    state.db.scylla.query_unpaged(
-        "DELETE FROM reactions WHERE channel_id = ? AND message_id = ? AND emoji = ?",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().delete_emoji_reactions,
         (channel_id, message_id, emoji.as_str()),
     )
     .await

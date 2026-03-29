@@ -262,7 +262,7 @@ async fn execute_webhook(
     if content.is_empty() {
         return Err(AppError::BadRequest("Content must not be empty".into()));
     }
-    if content.len() > 4000 {
+    if content.chars().count() > 4000 {
         return Err(AppError::BadRequest("Content must be 4000 characters or less".into()));
     }
 
@@ -285,9 +285,8 @@ async fn execute_webhook(
     let message_id = state.snowflake.next_id();
     let b = lumiere_models::bucket::bucket_from_snowflake(message_id);
 
-    state.db.scylla.query_unpaged(
-        "INSERT INTO messages (channel_id, bucket, message_id, author_id, content, type, flags, \
-         pinned, mention_everyone, deleted) VALUES (?, ?, ?, ?, ?, 0, 0, false, false, false)",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().insert_webhook_message,
         (channel_id, b, message_id.value() as i64, webhook_id, Some(content)),
     )
     .await

@@ -24,44 +24,62 @@ export const options = {
 };
 
 export function setup() {
-    const user = register(
-        `mixed_${Date.now()}`,
-        `mixed_${Date.now()}@test.com`,
-        'testpassword123'
-    );
+    const users = [];
+    for (let i = 0; i < 10; i++) {
+        const user = register(
+            `mixed_${Date.now()}_${i}`,
+            `mixed_${Date.now()}_${i}@test.com`,
+            'testpassword123'
+        );
+        if (user) users.push(user);
+    }
+
+    if (users.length === 0) {
+        throw new Error('No users could be registered for mixed workload test');
+    }
 
     const serverRes = http.post(
         `${BASE_URL}/api/v1/servers`,
         JSON.stringify({ name: 'Mixed Workload Server' }),
-        { headers: authHeaders(user.access_token) }
+        { headers: authHeaders(users[0].access_token) }
     );
     const server = JSON.parse(serverRes.body);
 
     const channelsRes = http.get(
         `${BASE_URL}/api/v1/servers/${server.id}/channels`,
-        { headers: authHeaders(user.access_token) }
+        { headers: authHeaders(users[0].access_token) }
     );
     const channels = JSON.parse(channelsRes.body);
     const textChannel = channels.find(c => c.type === 0);
+
+    // Have all other users join the server
+    for (let i = 1; i < users.length; i++) {
+        http.post(
+            `${BASE_URL}/api/v1/servers/${server.id}/join`,
+            null,
+            { headers: authHeaders(users[i].access_token) }
+        );
+    }
 
     // Seed some messages
     for (let i = 0; i < 50; i++) {
         http.post(
             `${BASE_URL}/api/v1/channels/${textChannel.id}/messages`,
             JSON.stringify({ content: `Seed message ${i}` }),
-            { headers: authHeaders(user.access_token) }
+            { headers: authHeaders(users[0].access_token) }
         );
     }
 
     return {
-        token: user.access_token,
+        users,
         serverId: server.id,
         channelId: textChannel.id,
     };
 }
 
 export default function (data) {
-    const headers = authHeaders(data.token);
+    const user = data.users[__VU % data.users.length];
+    const headers = authHeaders(user.access_token);
     const roll = Math.random();
 
     if (roll < 0.70) {

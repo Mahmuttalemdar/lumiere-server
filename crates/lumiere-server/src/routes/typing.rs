@@ -84,9 +84,8 @@ async fn ack_message(
 
     let now = CqlTimestamp(chrono::Utc::now().timestamp_millis());
 
-    state.db.scylla.query_unpaged(
-        "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count, updated_at) \
-         VALUES (?, ?, ?, 0, ?)",
+    state.db.scylla.execute_unpaged(
+        &state.db.prepared().upsert_read_state,
         (auth.id.value() as i64, channel_id, message_id, now),
     )
     .await
@@ -124,9 +123,8 @@ async fn ack_server(
 
     for (channel_id, last_msg) in channels {
         if let Some(last_message_id) = last_msg {
-            let _ = state.db.scylla.query_unpaged(
-                "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count, updated_at) \
-                 VALUES (?, ?, ?, 0, ?)",
+            let _ = state.db.scylla.execute_unpaged(
+                &state.db.prepared().upsert_read_state,
                 (user_id, channel_id, last_message_id, now),
             ).await;
         }
@@ -148,8 +146,8 @@ async fn get_unread(
 ) -> Result<impl IntoResponse, AppError> {
     let user_id = auth.id.value() as i64;
 
-    let qr = state.db.scylla.query_unpaged(
-        "SELECT channel_id, last_message_id, mention_count FROM read_states WHERE user_id = ? LIMIT 1000",
+    let qr = state.db.scylla.execute_unpaged(
+        &state.db.prepared().get_unread,
         (user_id,),
     )
     .await

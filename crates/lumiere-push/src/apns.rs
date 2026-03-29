@@ -160,6 +160,47 @@ impl ApnsClient {
         Ok(token)
     }
 
+    /// Build the APNs payload and URL for a given device token.
+    fn build_request(
+        &self,
+        device_token: &str,
+        notification: &PushNotification,
+    ) -> (String, ApnsPayload) {
+        let payload = ApnsPayload {
+            aps: ApnsAps {
+                alert: ApnsAlert {
+                    title: notification.title.clone(),
+                    body: notification.body.clone(),
+                },
+                badge: notification.badge,
+                sound: notification.sound.clone(),
+                thread_id: notification.thread_id.clone(),
+            },
+            data: notification.data.clone(),
+        };
+        let url = format!("{}/3/device/{}", self.base_url, device_token);
+        (url, payload)
+    }
+
+    /// Execute a single APNs HTTP/2 request with the given JWT.
+    async fn do_send(
+        &self,
+        url: &str,
+        jwt: &str,
+        payload: &ApnsPayload,
+    ) -> Result<reqwest::Response, PushError> {
+        self.http
+            .post(url)
+            .header("authorization", format!("bearer {}", jwt))
+            .header("apns-topic", &self.bundle_id)
+            .header("apns-push-type", "alert")
+            .header("apns-priority", "10")
+            .json(payload)
+            .send()
+            .await
+            .map_err(|e| PushError::ApnsError(format!("HTTP request failed: {}", e)))
+    }
+
     /// Send a push notification to a single APNs device token.
     pub async fn send(
         &self,
@@ -175,34 +216,8 @@ impl ApnsClient {
         }
 
         let jwt = self.get_or_refresh_token().await?;
-
-        let payload = ApnsPayload {
-            aps: ApnsAps {
-                alert: ApnsAlert {
-                    title: notification.title.clone(),
-                    body: notification.body.clone(),
-                },
-                badge: notification.badge,
-                sound: notification.sound.clone(),
-                thread_id: notification.thread_id.clone(),
-            },
-            data: notification.data.clone(),
-        };
-
-        let url = format!("{}/3/device/{}", self.base_url, device_token);
-
-        let response = self
-            .http
-            .post(&url)
-            .header("authorization", format!("bearer {}", jwt))
-            .header("apns-topic", &self.bundle_id)
-            .header("apns-push-type", "alert")
-            .header("apns-priority", "10")
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| PushError::ApnsError(format!("HTTP request failed: {}", e)))?;
-
+        let (url, payload) = self.build_request(device_token, notification);
+        let response = self.do_send(&url, &jwt, &payload).await?;
         let status = response.status();
 
         match status.as_u16() {
@@ -212,6 +227,27 @@ impl ApnsClient {
                     "APNs notification delivered"
                 );
                 Ok(())
+            }
+            401 | 403 => {
+                // Token expired/invalid — invalidate cache and retry once.
+                warn!(status = status.as_u16(), "APNs auth failed, invalidating cached token and retrying");
+                *self.cached_token.write().await = None;
+
+                let fresh_jwt = self.get_or_refresh_token().await?;
+                let retry_response = self.do_send(&url, &fresh_jwt, &payload).await?;
+
+                if retry_response.status().is_success() {
+                    debug!("APNs notification delivered after token refresh");
+                    Ok(())
+                } else {
+                    let status_code = retry_response.status().as_u16();
+                    let body = retry_response.text().await.unwrap_or_default();
+                    Err(PushError::ApnsError(format!(
+                        "APNs retry failed after token refresh ({}): {}",
+                        status_code,
+                        body
+                    )))
+                }
             }
             410 => {
                 // Device token is no longer valid (unregistered).

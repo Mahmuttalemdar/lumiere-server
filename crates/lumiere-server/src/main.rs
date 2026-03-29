@@ -58,24 +58,25 @@ async fn main() -> anyhow::Result<()> {
 
     // 6. Start background JetStream workers
     let cancel = CancellationToken::new();
+    let mut worker_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
     let worker_state = state.clone();
     let worker_cancel = cancel.clone();
-    tokio::spawn(async move {
+    worker_handles.push(tokio::spawn(async move {
         lumiere_server::workers::search_indexer::start(worker_state, worker_cancel).await;
-    });
+    }));
 
     let worker_state = state.clone();
     let worker_cancel = cancel.clone();
-    tokio::spawn(async move {
+    worker_handles.push(tokio::spawn(async move {
         lumiere_server::workers::push_worker::start(worker_state, worker_cancel).await;
-    });
+    }));
 
     let worker_state = state.clone();
     let worker_cancel = cancel.clone();
-    tokio::spawn(async move {
+    worker_handles.push(tokio::spawn(async move {
         lumiere_server::workers::read_state_worker::start(worker_state, worker_cancel).await;
-    });
+    }));
 
     tracing::info!("Background workers started (search-indexer, push-worker, read-state-updater)");
 
@@ -87,6 +88,12 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(cancel))
         .await?;
+
+    // Wait for all workers to finish draining
+    tracing::info!("Waiting for background workers to shut down...");
+    for handle in worker_handles {
+        let _ = handle.await;
+    }
 
     tracing::info!("Lumiere server shut down cleanly");
     Ok(())

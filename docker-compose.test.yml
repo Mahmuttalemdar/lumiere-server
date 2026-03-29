@@ -1,7 +1,7 @@
 # Isolated test infrastructure — uses different ports to avoid conflicts
 services:
   scylladb-test:
-    image: scylladb/scylla:latest
+    image: scylladb/scylla:6.2
     ports:
       - "19042:9042"
     command: --smp 1 --memory 512M --overprovisioned 1
@@ -36,8 +36,22 @@ services:
       timeout: 2s
       retries: 10
 
+  minio-test:
+    image: minio/minio:latest
+    ports:
+      - "19000:9000"
+    environment:
+      MINIO_ROOT_USER: lumiere
+      MINIO_ROOT_PASSWORD: lumiere_test
+    command: server /data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   nats-test:
-    image: nats:latest
+    image: nats:2.10
     ports:
       - "14222:4222"
       - "18222:8222"

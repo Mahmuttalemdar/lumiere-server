@@ -6,7 +6,7 @@ use axum::{
 };
 use redis::AsyncCommands;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AppState;
@@ -14,12 +14,15 @@ use crate::AppState;
 // ─── Lua Token Bucket Script ───────────────────────────────────────────────
 
 /// Redis Lua script implementing a token bucket rate limiter.
+/// Uses Redis server time (milliseconds) to avoid client clock skew.
 /// Returns: {allowed (0/1), retry_after_ms, remaining_tokens}
 const RATE_LIMIT_SCRIPT: &str = r#"
 local key = KEYS[1]
 local rate = tonumber(ARGV[1])
-local window = tonumber(ARGV[2])
-local now = tonumber(ARGV[3])
+local window_ms = tonumber(ARGV[2]) * 1000
+
+local time = redis.call('TIME')
+local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
 
 local data = redis.call('HMGET', key, 'tokens', 'last')
 local tokens = tonumber(data[1])
@@ -31,19 +34,32 @@ if tokens == nil then
 end
 
 local elapsed = math.max(0, now - last)
-local refill = elapsed * rate / window
+local refill = elapsed * rate / window_ms
 tokens = math.min(rate, tokens + refill)
 
 if tokens < 1 then
-    local wait = math.ceil((1 - tokens) * window / rate)
+    local wait = math.ceil((1 - tokens) * window_ms / rate)
     return {0, wait, math.floor(tokens)}
 end
 
 tokens = tokens - 1
 redis.call('HMSET', key, 'tokens', tostring(tokens), 'last', tostring(now))
-redis.call('EXPIRE', key, window * 2)
+redis.call('EXPIRE', key, math.ceil(window_ms / 1000) * 2)
 return {1, 0, math.floor(tokens)}
 "#;
+
+/// Lua script for atomic login failure tracking (INCR + EXPIRE without race).
+const LOGIN_FAILURE_SCRIPT: &str = r#"
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return count
+"#;
+
+static RATE_LIMIT_LUA: LazyLock<redis::Script> =
+    LazyLock::new(|| redis::Script::new(RATE_LIMIT_SCRIPT));
+
+static LOGIN_FAILURE_LUA: LazyLock<redis::Script> =
+    LazyLock::new(|| redis::Script::new(LOGIN_FAILURE_SCRIPT));
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -112,23 +128,18 @@ pub fn reaction_limit() -> RateLimitConfig {
 // ─── Core Check ────────────────────────────────────────────────────────────
 
 /// Execute the token bucket rate limit check against Redis.
+/// Uses Redis server time internally (no client-side timestamp).
 pub async fn check_rate_limit(
     redis: &mut redis::aio::ConnectionManager,
     config: &RateLimitConfig,
     identifier: &str,
 ) -> Result<RateLimitResult, lumiere_models::error::AppError> {
     let key = format!("{}:{}", config.key_prefix, identifier);
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
 
-    let script = redis::Script::new(RATE_LIMIT_SCRIPT);
-    let result: Vec<i64> = script
+    let result: Vec<i64> = RATE_LIMIT_LUA
         .key(&key)
         .arg(config.max_requests)
         .arg(config.window_seconds)
-        .arg(now as i64)
         .invoke_async(redis)
         .await
         .map_err(|e| {
@@ -168,27 +179,20 @@ pub async fn is_login_blocked(
 }
 
 /// Record a failed login attempt. If the threshold is exceeded, block the IP.
+/// Uses atomic Lua script to avoid INCR+EXPIRE race condition.
 pub async fn record_login_failure(
     redis: &mut redis::aio::ConnectionManager,
     ip: &str,
 ) -> Result<(), lumiere_models::error::AppError> {
     let fail_key = format!("ip_fail:{}", ip);
-    let count: u32 = redis::cmd("INCR")
-        .arg(&fail_key)
-        .query_async(redis)
+    let count: u32 = LOGIN_FAILURE_LUA
+        .key(&fail_key)
+        .arg(LOGIN_BLOCK_SECONDS as i64)
+        .invoke_async(redis)
         .await
         .map_err(|e| {
             lumiere_models::error::AppError::Internal(anyhow::anyhow!("Redis error: {}", e))
         })?;
-
-    // Set TTL on first failure
-    if count == 1 {
-        let _: Result<(), _> = redis::cmd("EXPIRE")
-            .arg(&fail_key)
-            .arg(LOGIN_BLOCK_SECONDS as i64)
-            .query_async(redis)
-            .await;
-    }
 
     if count >= LOGIN_FAIL_MAX {
         let block_key = format!("ip_block:{}", ip);
@@ -239,9 +243,17 @@ fn extract_identifier(req: &Request) -> String {
     extract_client_ip(req)
 }
 
-/// Extract the client IP from common headers or connection info.
+/// Extract the client IP from the request.
+/// Prefers the direct connection IP (ConnectInfo) to prevent spoofing via
+/// X-Forwarded-For. Only falls back to proxy headers when ConnectInfo is
+/// not available (e.g. behind a reverse proxy that strips it).
 pub fn extract_client_ip(req: &Request) -> String {
-    // Check X-Forwarded-For first (reverse proxy)
+    // Prefer direct connection IP over proxy headers to prevent spoofing
+    if let Some(connect_info) = req.extensions().get::<ConnectInfo<SocketAddr>>() {
+        return format!("ip:{}", connect_info.0.ip());
+    }
+
+    // Fallback to headers only if ConnectInfo not available
     if let Some(forwarded_for) = req.headers().get("x-forwarded-for") {
         if let Ok(value) = forwarded_for.to_str() {
             if let Some(first_ip) = value.split(',').next() {
@@ -250,19 +262,12 @@ pub fn extract_client_ip(req: &Request) -> String {
         }
     }
 
-    // Check X-Real-IP
     if let Some(real_ip) = req.headers().get("x-real-ip") {
         if let Ok(value) = real_ip.to_str() {
             return format!("ip:{}", value.trim());
         }
     }
 
-    // Fall back to ConnectInfo if available
-    if let Some(connect_info) = req.extensions().get::<ConnectInfo<SocketAddr>>() {
-        return format!("ip:{}", connect_info.0.ip());
-    }
-
-    // Last resort
     "ip:unknown".to_string()
 }
 

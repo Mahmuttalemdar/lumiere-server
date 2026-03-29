@@ -11,47 +11,55 @@ const FILTER_SUBJECT: &str = "persist.messages.>";
 
 /// Start the push notification worker. Pulls MESSAGE_CREATE events from
 /// JetStream and sends push notifications to offline channel members.
-/// Runs until `cancel` is triggered.
+/// Runs until `cancel` is triggered. Automatically restarts on stream
+/// disconnection.
 pub async fn start(state: Arc<AppState>, cancel: CancellationToken) {
-    tracing::info!("Starting push notification worker");
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        tracing::info!("Starting push notification worker...");
+        match run_consumer(&state, &cancel).await {
+            Ok(()) => return, // graceful shutdown
+            Err(e) => {
+                tracing::error!(error = %e, "Push worker crashed, restarting in 5s");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
 
-    let consumer = match state
+async fn run_consumer(
+    state: &AppState,
+    cancel: &CancellationToken,
+) -> anyhow::Result<()> {
+    let consumer = state
         .nats
         .create_pull_consumer(STREAM_NAME, CONSUMER_NAME, Some(FILTER_SUBJECT))
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to create push worker consumer");
-            return;
-        }
-    };
+        .await?;
 
-    let mut messages = match consumer.messages().await {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to open push worker message stream");
-            return;
-        }
-    };
+    let mut messages = consumer.messages().await?;
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
                 tracing::info!("Push notification worker shutting down");
-                break;
+                return Ok(());
             }
             msg = messages.next() => {
                 let Some(Ok(msg)) = msg else {
-                    tracing::warn!("Push worker message stream ended unexpectedly, restarting in 1s");
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    break;
+                    anyhow::bail!("Push worker message stream ended unexpectedly");
                 };
-                if let Err(e) = process_message(&state, &msg).await {
-                    tracing::error!(error = %e, "Push worker process error");
-                }
-                if let Err(e) = msg.ack().await {
-                    tracing::warn!(error = %e, "Push worker ack failed");
+                match process_message(state, &msg).await {
+                    Ok(()) => {
+                        if let Err(e) = msg.ack().await {
+                            tracing::warn!(error = %e, "Push worker ack failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Push worker process error, will be redelivered");
+                        // Don't ack — NATS will redeliver after ack_wait (30s)
+                    }
                 }
             }
         }
@@ -121,16 +129,17 @@ async fn process_message(
 
     // Filter out online users (they already see messages via WebSocket).
     // Users with an active presence key in Redis are considered online.
+    // Use a pipeline to avoid N+1 Redis round-trips.
     let mut offline_recipients = Vec::new();
     {
         let mut conn = state.redis.clone();
+        let mut pipe = redis::pipe();
         for &uid in &recipients {
-            let key = format!("presence:{}", uid);
-            let online: bool = redis::cmd("EXISTS")
-                .arg(&key)
-                .query_async(&mut conn)
-                .await
-                .unwrap_or(false);
+            pipe.cmd("EXISTS").arg(format!("presence:{}", uid));
+        }
+        let results: Vec<bool> = pipe.query_async(&mut conn).await.unwrap_or_default();
+        for (i, &uid) in recipients.iter().enumerate() {
+            let online = results.get(i).copied().unwrap_or(false);
             if !online {
                 offline_recipients.push(uid);
             }
@@ -141,9 +150,11 @@ async fn process_message(
         return Ok(());
     }
 
-    // Truncate long messages for the notification body
-    let body_text = if content.len() > 200 {
-        format!("{}...", &content[..197])
+    // Truncate long messages for the notification body.
+    // Use .chars().take() to avoid panic on multi-byte UTF-8 boundaries.
+    let body_text = if content.chars().count() > 200 {
+        let truncated: String = content.chars().take(197).collect();
+        format!("{}...", truncated)
     } else if content.is_empty() {
         "Sent an attachment".to_string()
     } else {

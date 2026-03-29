@@ -9,10 +9,25 @@
 /// Preserves newlines (`\n`), carriage returns (`\r`), and tabs (`\t`)
 /// since those are valid in message content. All other ASCII/Unicode
 /// control characters (including null bytes) are removed.
+/// Also strips Unicode bidi override characters to prevent text reordering attacks.
+
+/// Returns `true` for Unicode bidirectional override / isolate characters
+/// that can be abused to reorder displayed text (CVE-2021-42574 "Trojan Source").
+fn is_bidi_override(c: char) -> bool {
+    matches!(c,
+        '\u{202A}'..='\u{202E}' | // LRE, RLE, PDF, LRO, RLO
+        '\u{2066}'..='\u{2069}' | // LRI, RLI, FSI, PDI
+        '\u{200E}' | '\u{200F}'   // LRM, RLM
+    )
+}
+
 pub fn sanitize_string(input: &str) -> String {
     input
         .chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
+        .filter(|c| {
+            (!c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
+                && !is_bidi_override(*c)
+        })
         .collect()
 }
 
@@ -95,5 +110,17 @@ mod tests {
     #[test]
     fn test_normalize_display_name_with_control() {
         assert_eq!(normalize_display_name("admin\x07\x1B name"), "admin name");
+    }
+
+    #[test]
+    fn test_sanitize_string_strips_bidi_overrides() {
+        // LRO (U+202D), RLO (U+202E), LRI (U+2066), PDI (U+2069)
+        assert_eq!(sanitize_string("hello\u{202D}\u{202E}world"), "helloworld");
+        assert_eq!(sanitize_string("a\u{2066}b\u{2069}c"), "abc");
+    }
+
+    #[test]
+    fn test_sanitize_string_strips_lrm_rlm() {
+        assert_eq!(sanitize_string("a\u{200E}b\u{200F}c"), "abc");
     }
 }
