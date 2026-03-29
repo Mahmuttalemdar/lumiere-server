@@ -439,6 +439,7 @@ async fn send_message(
     let event = serde_json::json!({
         "type": "MESSAGE_CREATE",
         "channel_id": channel_id,
+        "server_id": server_id,
         "message": serde_json::to_value(&response).unwrap_or_default(),
     });
     if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
@@ -519,6 +520,9 @@ async fn edit_message(
     if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
+    if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
+        tracing::warn!(error = %e, "Failed to publish durable MESSAGE_UPDATE event");
+    }
 
     get_message(State(state), auth, Path((channel_id, message_id))).await
 }
@@ -563,6 +567,9 @@ async fn delete_message(
     if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
+    if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
+        tracing::warn!(error = %e, "Failed to publish durable MESSAGE_DELETE event");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -604,6 +611,9 @@ async fn bulk_delete(
     });
     if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
         tracing::warn!(error = %e, "Failed to publish NATS event");
+    }
+    if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
+        tracing::warn!(error = %e, "Failed to publish durable MESSAGE_DELETE_BULK event");
     }
 
     Ok(StatusCode::NO_CONTENT)

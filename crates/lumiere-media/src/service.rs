@@ -1,8 +1,12 @@
 use crate::error::MediaError;
 use crate::validation::{AccountTier, FileValidation};
 use crate::S3Client;
+use bytes::Bytes;
+use futures::stream::Stream;
 use lumiere_models::snowflake::Snowflake;
 use sha2::{Digest, Sha256};
+use std::pin::Pin;
+use tokio::io::AsyncRead;
 
 /// High-level media operations built on top of S3Client.
 #[derive(Clone)]
@@ -13,6 +17,11 @@ pub struct MediaService {
 impl MediaService {
     pub fn new(s3: S3Client) -> Self {
         Self { s3 }
+    }
+
+    /// Return a reference to the underlying S3 client.
+    pub fn s3(&self) -> &S3Client {
+        &self.s3
     }
 
     /// Upload a user or server avatar.
@@ -80,6 +89,61 @@ impl MediaService {
         Ok(key)
     }
 
+    /// Upload a message attachment from an async byte stream.
+    ///
+    /// This avoids buffering the entire file in memory — data flows from the
+    /// client's multipart upload directly into MinIO/S3.
+    ///
+    /// **Validation**: Content type is checked against the allowlist. Magic byte
+    /// validation cannot be performed on streams (the first chunk would need to
+    /// be inspected), so callers should validate magic bytes on the first chunk
+    /// before calling this method when security is critical.
+    ///
+    /// Returns `(object_key, uploaded_bytes)`.
+    pub async fn upload_attachment_stream<R>(
+        &self,
+        channel_id: Snowflake,
+        attachment_id: Snowflake,
+        filename: &str,
+        content_type: &str,
+        content_length: u64,
+        tier: AccountTier,
+        reader: &mut R,
+    ) -> Result<(String, u64), MediaError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        // Validate content type is allowed
+        FileValidation::validate_attachment_content_type(content_type)?;
+
+        // Validate content length against tier limit
+        let max = tier.max_attachment_size();
+        if content_length > max as u64 {
+            return Err(MediaError::FileTooLarge {
+                size: content_length as usize,
+                max,
+            });
+        }
+
+        let safe_filename = sanitize_filename(filename);
+        let key = format!(
+            "attachments/{}/{}/{}",
+            channel_id, attachment_id, safe_filename
+        );
+
+        let uploaded = self.s3.upload_stream(&key, content_type, reader).await?;
+
+        tracing::info!(
+            channel_id = %channel_id,
+            attachment_id = %attachment_id,
+            key = %key,
+            size = uploaded,
+            "Attachment streamed to S3"
+        );
+
+        Ok((key, uploaded))
+    }
+
     /// Delete a file by its object key.
     pub async fn delete_file(&self, key: &str) -> Result<(), MediaError> {
         self.s3.delete(key).await?;
@@ -94,6 +158,20 @@ impl MediaService {
         self.s3.download(key).await
     }
 
+    /// Download a file as a byte stream (for proxied downloads).
+    ///
+    /// The key must start with an allowed prefix. Returns a stream of `Bytes`
+    /// chunks that can be forwarded directly to an HTTP response body.
+    pub async fn download_file_stream(
+        &self,
+        key: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>, MediaError>
+    {
+        validate_key_prefix(key)?;
+        let (_status, stream) = self.s3.download_stream(key).await?;
+        Ok(stream)
+    }
+
     /// Generate a presigned download URL.
     /// The key must start with an allowed prefix. Expiry is clamped to 60..604800 seconds.
     pub async fn get_presigned_url(
@@ -104,6 +182,19 @@ impl MediaService {
         validate_key_prefix(key)?;
         let clamped_expiry = expiry_secs.clamp(60, 604800);
         self.s3.get_presigned_url(key, clamped_expiry).await
+    }
+
+    /// Get a presigned URL for direct client download (preferred over proxying).
+    ///
+    /// This avoids proxying through the server entirely. Default expiry: 1 hour.
+    pub async fn get_download_url(
+        &self,
+        key: &str,
+        expiry_secs: u32,
+    ) -> Result<String, MediaError> {
+        validate_key_prefix(key)?;
+        let clamped = expiry_secs.clamp(60, 604800);
+        self.s3.get_download_url(key, clamped).await
     }
 }
 

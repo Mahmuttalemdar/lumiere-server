@@ -1,21 +1,28 @@
+pub mod middleware;
 pub mod routes;
+pub mod workers;
 
 use axum::{
     http::{HeaderName, Method},
+    middleware as axum_middleware,
     response::IntoResponse,
     routing::get,
     Json, Router,
 };
 use lumiere_auth::middleware::AuthState;
 use lumiere_db::Database;
+use lumiere_media::{MediaService, S3Client};
 use lumiere_models::config::AppConfig;
 use lumiere_nats::NatsService;
 use serde_json::json;
 use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
+    limit::RequestBodyLimitLayer,
     trace::TraceLayer,
 };
+
+use middleware::security::security_headers_middleware;
 
 pub struct AppState {
     pub config: AppConfig,
@@ -23,6 +30,11 @@ pub struct AppState {
     pub redis: redis::aio::ConnectionManager,
     pub nats: NatsService,
     pub snowflake: lumiere_models::snowflake::SnowflakeGenerator,
+    pub media: MediaService,
+    /// Meilisearch search service. `None` if Meilisearch is not available.
+    pub search: Option<lumiere_search::SearchService>,
+    /// Push notification service. `None` if push is not configured.
+    pub push: Option<lumiere_push::PushService>,
 }
 
 impl AuthState for AppState {
@@ -43,11 +55,34 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<Arc<AppState>>
     let nats = NatsService::connect(&config.nats).await?;
     nats.setup_streams().await?;
 
+    let s3_client = S3Client::connect(&config.minio)
+        .map_err(|e| anyhow::anyhow!("Failed to connect to MinIO/S3: {}", e))?;
+    let media = MediaService::new(s3_client);
+
     let machine_id: u16 = std::env::var("MACHINE_ID")
         .unwrap_or_else(|_| "1".into())
         .parse()
         .unwrap_or(1);
     let snowflake = lumiere_models::snowflake::SnowflakeGenerator::new(machine_id);
+
+    // Connect to Meilisearch (best-effort — workers degrade gracefully if absent)
+    let search = match lumiere_search::SearchService::connect(&config.meilisearch).await {
+        Ok(s) => {
+            tracing::info!("Meilisearch connected");
+            Some(s)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Meilisearch not available — search indexer will be disabled");
+            None
+        }
+    };
+
+    // Push notification service (in-memory token store for now).
+    // APNs/FCM clients are not configured by default — set via environment.
+    let push = {
+        let token_store = std::sync::Arc::new(lumiere_push::DeviceTokenStore::new());
+        Some(lumiere_push::PushService::new(None, None, token_store))
+    };
 
     Ok(Arc::new(AppState {
         config,
@@ -55,6 +90,9 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<Arc<AppState>>
         redis,
         nats,
         snowflake,
+        media,
+        search,
+        push,
     }))
 }
 
@@ -111,6 +149,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .nest("/api/v1/webhooks", routes::webhooks::webhook_exec_router())
         .nest("/api/v1/applications", routes::webhooks::applications_router())
         .nest("/api/v1/servers", routes::roles::router())
+        // Default request body size limit: 1 MB
+        .layer(RequestBodyLimitLayer::new(1024 * 1024))
+        // Security headers on every response
+        .layer(axum_middleware::from_fn(security_headers_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state)

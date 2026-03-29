@@ -99,6 +99,18 @@ impl FileValidation {
         Ok(())
     }
 
+    /// Validate only the content type for an attachment (used for streaming uploads
+    /// where the full data is not available upfront).
+    pub fn validate_attachment_content_type(content_type: &str) -> Result<(), MediaError> {
+        if !ATTACHMENT_CONTENT_TYPES.contains(&content_type) {
+            return Err(MediaError::InvalidContentType(format!(
+                "'{}' is not an allowed attachment type. Allowed: {:?}",
+                content_type, ATTACHMENT_CONTENT_TYPES
+            )));
+        }
+        Ok(())
+    }
+
     /// Infer a file extension from a content type.
     pub fn extension_for_content_type(content_type: &str) -> Result<&'static str, MediaError> {
         match content_type {

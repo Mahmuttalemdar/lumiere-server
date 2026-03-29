@@ -1,5 +1,6 @@
 use lumiere_models::config::AppConfig;
 use lumiere_server::{build_app_state, build_router};
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
@@ -55,14 +56,71 @@ async fn main() -> anyhow::Result<()> {
         app = app.layer(cors);
     }
 
-    // 6. Start server
+    // 6. Start background JetStream workers
+    let cancel = CancellationToken::new();
+
+    let worker_state = state.clone();
+    let worker_cancel = cancel.clone();
+    tokio::spawn(async move {
+        lumiere_server::workers::search_indexer::start(worker_state, worker_cancel).await;
+    });
+
+    let worker_state = state.clone();
+    let worker_cancel = cancel.clone();
+    tokio::spawn(async move {
+        lumiere_server::workers::push_worker::start(worker_state, worker_cancel).await;
+    });
+
+    let worker_state = state.clone();
+    let worker_cancel = cancel.clone();
+    tokio::spawn(async move {
+        lumiere_server::workers::read_state_worker::start(worker_state, worker_cancel).await;
+    });
+
+    tracing::info!("Background workers started (search-indexer, push-worker, read-state-updater)");
+
+    // 7. Start server with graceful shutdown
     let addr = format!("{}:{}", config.server.host, config.server.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Lumiere server listening on {}", addr);
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(cancel))
+        .await?;
 
+    tracing::info!("Lumiere server shut down cleanly");
     Ok(())
+}
+
+/// Wait for SIGINT (Ctrl+C) or SIGTERM, then cancel all workers.
+async fn shutdown_signal(cancel: CancellationToken) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => tracing::info!("Received SIGINT, initiating graceful shutdown"),
+        _ = terminate => tracing::info!("Received SIGTERM, initiating graceful shutdown"),
+    }
+
+    // Signal all workers to stop
+    cancel.cancel();
+
+    // Give workers a moment to drain in-flight messages
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 }
 
 fn init_tracing() {
