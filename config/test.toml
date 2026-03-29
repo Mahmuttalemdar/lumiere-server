@@ -1,0 +1,41 @@
+[server]
+host = "127.0.0.1"
+port = 0  # random port for testing
+
+[database]
+url = "postgres://lumiere:lumiere_test@localhost:15432/lumiere_test"
+max_connections = 10
+min_connections = 1
+
+[scylla]
+nodes = ["127.0.0.1:19042"]
+keyspace = "lumiere_test"
+replication_factor = 1
+
+[redis]
+url = "redis://127.0.0.1:16379"
+
+[nats]
+url = "nats://127.0.0.1:14222"
+
+[meilisearch]
+url = "http://127.0.0.1:7700"
+api_key = "lumiere_dev_key"
+
+[minio]
+endpoint = "http://127.0.0.1:9000"
+access_key = "lumiere"
+secret_key = "lumiere_dev"
+bucket = "lumiere-test"
+region = "us-east-1"
+use_ssl = false
+
+[livekit]
+url = "http://127.0.0.1:7880"
+api_key = "devkey"
+api_secret = "devsecret"
+
+[auth]
+jwt_secret = "test_jwt_secret_not_for_production"
+access_token_ttl = 900
+refresh_token_ttl = 604800

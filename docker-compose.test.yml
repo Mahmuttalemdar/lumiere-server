@@ -1,0 +1,52 @@
+# Isolated test infrastructure — uses different ports to avoid conflicts
+services:
+  scylladb-test:
+    image: scylladb/scylla:latest
+    ports:
+      - "19042:9042"
+    command: --smp 1 --memory 512M --overprovisioned 1
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'SELECT now() FROM system.local'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres-test:
+    image: postgres:17
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_DB: lumiere_test
+      POSTGRES_USER: lumiere
+      POSTGRES_PASSWORD: lumiere_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lumiere"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  nats-test:
+    image: nats:latest
+    ports:
+      - "14222:4222"
+      - "18222:8222"
+    command:
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "--max_mem_store=64M"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8222/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
