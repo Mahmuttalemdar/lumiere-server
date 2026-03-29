@@ -1,0 +1,16 @@
+[package]
+name = "lumiere-media"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lumiere-models = { workspace = true }
+rust-s3 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+bytes = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }

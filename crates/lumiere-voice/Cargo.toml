@@ -1,0 +1,16 @@
+[package]
+name = "lumiere-voice"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lumiere-models = { workspace = true }
+livekit-api = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+redis = { workspace = true }
+chrono = { workspace = true }

@@ -1,0 +1,41 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[database]
+url = "postgres://lumiere:lumiere_dev@localhost:6432/lumiere"
+max_connections = 50
+min_connections = 5
+
+[scylla]
+nodes = ["127.0.0.1:9042"]
+keyspace = "lumiere"
+replication_factor = 1
+
+[redis]
+url = "redis://127.0.0.1:6379"
+
+[nats]
+url = "nats://127.0.0.1:4222"
+
+[meilisearch]
+url = "http://127.0.0.1:7700"
+api_key = "lumiere_dev_key"
+
+[minio]
+endpoint = "http://127.0.0.1:9000"
+access_key = "lumiere"
+secret_key = "lumiere_dev"
+bucket = "lumiere"
+region = "us-east-1"
+use_ssl = false
+
+[livekit]
+url = "http://127.0.0.1:7880"
+api_key = "devkey"
+api_secret = "devsecret"
+
+[auth]
+jwt_secret = "lumiere_dev_jwt_secret_change_in_production"
+access_token_ttl = 900       # 15 minutes
+refresh_token_ttl = 604800   # 7 days

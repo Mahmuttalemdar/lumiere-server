@@ -1,0 +1,5 @@
+# Development overrides
+# All values from default.toml apply unless overridden here
+
+[scylla]
+replication_factor = 1

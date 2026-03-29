@@ -1,0 +1,21 @@
+[package]
+name = "lumiere-auth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lumiere-models = { workspace = true }
+lumiere-db = { workspace = true }
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+redis = { workspace = true }
+rand = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true }

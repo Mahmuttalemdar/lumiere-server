@@ -1,0 +1,25 @@
+[package]
+name = "lumiere-gateway"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lumiere-models = { workspace = true }
+lumiere-nats = { workspace = true }
+lumiere-auth = { workspace = true }
+lumiere-db = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+redis = { workspace = true }
+async-nats = { workspace = true }
+chrono = { workspace = true }
+nanoid = { workspace = true }
+sqlx = { workspace = true }

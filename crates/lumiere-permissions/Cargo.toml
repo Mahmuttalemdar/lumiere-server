@@ -1,0 +1,9 @@
+[package]
+name = "lumiere-permissions"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lumiere-models = { workspace = true }
+bitflags = { workspace = true }
+serde = { workspace = true }

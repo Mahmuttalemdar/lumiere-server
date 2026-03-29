@@ -1,0 +1,100 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lumiere-server",
+    "crates/lumiere-gateway",
+    "crates/lumiere-models",
+    "crates/lumiere-db",
+    "crates/lumiere-auth",
+    "crates/lumiere-permissions",
+    "crates/lumiere-nats",
+    "crates/lumiere-search",
+    "crates/lumiere-media",
+    "crates/lumiere-push",
+    "crates/lumiere-voice",
+    "crates/lumiere-data-services",
+]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.8", features = ["ws"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "limit", "request-id", "set-header"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Database - PostgreSQL
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "migrate"] }
+
+# Database - ScyllaDB
+scylla = "0.15"
+
+# Cache - Redis
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Message broker - NATS
+async-nats = "0.38"
+
+# Search - Meilisearch
+meilisearch-sdk = "0.27"
+
+# Object storage - MinIO/S3
+rust-s3 = { version = "0.35", features = ["tokio-rustls-tls"], default-features = false }
+
+# Voice/Video - LiveKit
+livekit-api = { version = "0.4", features = ["access-token", "services-tokio"] }
+
+# Auth
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+# ID generation
+chrono = { version = "0.4", features = ["serde"] }
+
+# Configuration
+config = "0.14"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+bitflags = "2"
+dashmap = "6"
+bytes = "1"
+futures = "0.3"
+rand = "0.8"
+base64 = "0.22"
+validator = { version = "0.19", features = ["derive"] }
+nanoid = "0.4"
+regex-lite = "0.1"
+sha2 = "0.10"
+hex = "0.4"
+
+# Metrics
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+# Internal crates
+lumiere-models = { path = "crates/lumiere-models" }
+lumiere-db = { path = "crates/lumiere-db" }
+lumiere-auth = { path = "crates/lumiere-auth" }
+lumiere-permissions = { path = "crates/lumiere-permissions" }
+lumiere-gateway = { path = "crates/lumiere-gateway" }
+lumiere-nats = { path = "crates/lumiere-nats" }
+lumiere-search = { path = "crates/lumiere-search" }
+lumiere-media = { path = "crates/lumiere-media" }
+lumiere-push = { path = "crates/lumiere-push" }
+lumiere-voice = { path = "crates/lumiere-voice" }
+lumiere-data-services = { path = "crates/lumiere-data-services" }

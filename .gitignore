@@ -1,0 +1,25 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

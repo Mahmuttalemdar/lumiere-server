@@ -1,0 +1,29 @@
+# Production overrides
+# Sensitive values should come from environment variables:
+#   LUMIERE__AUTH__JWT_SECRET
+#   LUMIERE__DATABASE__URL
+#   LUMIERE__DATABASE__MAX_CONNECTIONS
+#   LUMIERE__REDIS__URL
+#   LUMIERE__NATS__URL
+#   LUMIERE__MEILISEARCH__API_KEY
+#   LUMIERE__MINIO__ACCESS_KEY
+#   LUMIERE__MINIO__SECRET_KEY
+#   LUMIERE__LIVEKIT__API_KEY
+#   LUMIERE__LIVEKIT__API_SECRET
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[database]
+max_connections = 50
+min_connections = 10
+
+[scylla]
+# CRITICAL: Set LUMIERE__SCYLLA__NODES in environment
+# Example: LUMIERE__SCYLLA__NODES=["10.0.1.1:9042","10.0.1.2:9042"]
+replication_factor = 3
+
+[auth]
+access_token_ttl = 900       # 15 minutes
+refresh_token_ttl = 604800   # 7 days
