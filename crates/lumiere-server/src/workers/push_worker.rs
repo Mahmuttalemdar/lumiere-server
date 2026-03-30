@@ -92,7 +92,7 @@ async fn process_message(
 
     // Look up the author's display name for the notification title
     let author_name: Option<String> =
-        sqlx::query_scalar("SELECT display_name FROM users WHERE id = $1")
+        sqlx::query_scalar("SELECT username FROM users WHERE id = $1")
             .bind(author_id)
             .fetch_optional(&state.db.pg)
             .await?;
