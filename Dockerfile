@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 
 WORKDIR /app
 
-# Cache dependencies
+# Cache dependency downloads — only re-downloads when Cargo.toml/Cargo.lock change
 COPY Cargo.toml Cargo.lock ./
 COPY crates/lumiere-server/Cargo.toml crates/lumiere-server/Cargo.toml
 COPY crates/lumiere-gateway/Cargo.toml crates/lumiere-gateway/Cargo.toml
@@ -20,16 +20,24 @@ COPY crates/lumiere-push/Cargo.toml crates/lumiere-push/Cargo.toml
 COPY crates/lumiere-voice/Cargo.toml crates/lumiere-voice/Cargo.toml
 COPY crates/lumiere-data-services/Cargo.toml crates/lumiere-data-services/Cargo.toml
 
-# Create dummy src files to build dependencies
-RUN mkdir -p crates/lumiere-server/src && echo "fn main() {}" > crates/lumiere-server/src/main.rs
-RUN for crate in gateway models db auth permissions nats search media push voice data-services; do \
-      mkdir -p crates/lumiere-$crate/src && echo "" > crates/lumiere-$crate/src/lib.rs; \
+# Create minimal valid source files so cargo can resolve the workspace
+RUN for crate in server gateway models db auth permissions nats search media push voice data-services; do \
+      mkdir -p crates/lumiere-$crate/src; \
+    done && \
+    echo "fn main() {}" > crates/lumiere-server/src/main.rs && \
+    for crate in gateway models db auth permissions nats search media push voice data-services; do \
+      echo "// placeholder" > crates/lumiere-$crate/src/lib.rs; \
     done
 
-RUN cargo build --release --bin lumiere-server 2>/dev/null || true
+# Download all dependencies (cached unless Cargo.toml/Cargo.lock change)
+RUN cargo fetch
 
-# Now copy real source
+# Copy real source and build
 COPY . .
+
+# Touch all source files so cargo knows they changed (not the cached placeholders)
+RUN find crates -name "*.rs" -exec touch {} +
+
 RUN cargo build --release --bin lumiere-server
 
 # Stage 2: Runtime
