@@ -214,10 +214,7 @@ pub async fn clear_login_failures(
     ip: &str,
 ) -> Result<(), lumiere_models::error::AppError> {
     let fail_key = format!("ip_fail:{}", ip);
-    let _: Result<(), _> = redis::cmd("DEL")
-        .arg(&fail_key)
-        .query_async(redis)
-        .await;
+    let _: Result<(), _> = redis::cmd("DEL").arg(&fail_key).query_async(redis).await;
     Ok(())
 }
 
@@ -282,7 +279,10 @@ fn extract_user_id_from_token(token: &str) -> Option<String> {
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let payload_bytes = engine.decode(parts[1]).ok()?;
     let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
-    payload.get("sub").and_then(|v| v.as_str()).map(|s| s.to_string())
+    payload
+        .get("sub")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 // ─── Axum Middleware ───────────────────────────────────────────────────────
@@ -315,6 +315,7 @@ pub async fn global_rate_limit_middleware(
 
 /// Create a per-route rate limit middleware function.
 /// Returns an axum middleware function for the given config.
+#[allow(clippy::type_complexity)]
 pub fn route_rate_limit(
     config: RateLimitConfig,
 ) -> impl Fn(
@@ -347,6 +348,7 @@ pub fn route_rate_limit(
 }
 
 /// IP-only rate limit middleware for unauthenticated routes (register, login).
+#[allow(clippy::type_complexity)]
 pub fn ip_rate_limit(
     config: RateLimitConfig,
 ) -> impl Fn(
@@ -402,10 +404,7 @@ fn rate_limit_response(result: &RateLimitResult) -> Response {
         "x-ratelimit-limit",
         HeaderValue::from_str(&result.limit.to_string()).unwrap(),
     );
-    headers.insert(
-        "x-ratelimit-remaining",
-        HeaderValue::from_str("0").unwrap(),
-    );
+    headers.insert("x-ratelimit-remaining", HeaderValue::from_str("0").unwrap());
     headers.insert(
         "x-ratelimit-reset",
         HeaderValue::from_str(&reset.to_string()).unwrap(),

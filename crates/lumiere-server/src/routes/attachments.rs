@@ -52,13 +52,11 @@ async fn upload_attachment(
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
     // Look up the channel to find its server_id for permission checks
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT server_id FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db.pg)
-    .await
-    .map_err(|e| AppError::Internal(e.into()))?;
+    let row: Option<(i64,)> = sqlx::query_as("SELECT server_id FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.db.pg)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     let server_id = row
         .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
@@ -68,13 +66,11 @@ async fn upload_attachment(
     require_permissions(&state, server_id, auth.id, Permissions::ATTACH_FILES).await?;
 
     // Determine the user's account tier for size limits
-    let tier_row: Option<(i16,)> = sqlx::query_as(
-        "SELECT premium_type FROM users WHERE id = $1",
-    )
-    .bind(auth.id)
-    .fetch_optional(&state.db.pg)
-    .await
-    .map_err(|e| AppError::Internal(e.into()))?;
+    let tier_row: Option<(i16,)> = sqlx::query_as("SELECT premium_type FROM users WHERE id = $1")
+        .bind(auth.id)
+        .fetch_optional(&state.db.pg)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     let tier = match tier_row.map(|r| r.0).unwrap_or(0) {
         0 => AccountTier::Free,
@@ -84,14 +80,15 @@ async fn upload_attachment(
     // Extract the file field from the multipart form
     let field = match multipart.next_field().await {
         Ok(Some(f)) => f,
-        Ok(None) => return Err(AppError::BadRequest("No file field in multipart body".into())),
+        Ok(None) => {
+            return Err(AppError::BadRequest(
+                "No file field in multipart body".into(),
+            ))
+        }
         Err(e) => return Err(AppError::BadRequest(format!("Invalid multipart: {}", e))),
     };
 
-    let filename = field
-        .file_name()
-        .unwrap_or("file")
-        .to_string();
+    let filename = field.file_name().unwrap_or("file").to_string();
 
     let content_type = field
         .content_type()
@@ -135,12 +132,10 @@ async fn upload_attachment(
         )
         .await
         .map_err(|e| match e {
-            lumiere_media::MediaError::FileTooLarge { size, max } => {
-                AppError::BadRequest(format!(
-                    "File too large: {} bytes exceeds maximum {} bytes",
-                    size, max
-                ))
-            }
+            lumiere_media::MediaError::FileTooLarge { size, max } => AppError::BadRequest(format!(
+                "File too large: {} bytes exceeds maximum {} bytes",
+                size, max
+            )),
             lumiere_media::MediaError::InvalidContentType(msg) => AppError::BadRequest(msg),
             other => AppError::Internal(anyhow::anyhow!(other)),
         })?;
@@ -202,17 +197,15 @@ async fn download_attachment(
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
-    let (channel_id, filename, content_type, _size, s3_key) = row
-        .ok_or_else(|| AppError::NotFound("Attachment not found".into()))?;
+    let (channel_id, filename, content_type, _size, s3_key) =
+        row.ok_or_else(|| AppError::NotFound("Attachment not found".into()))?;
 
     // Check the user has access to the channel's server
-    let server_row: Option<(i64,)> = sqlx::query_as(
-        "SELECT server_id FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db.pg)
-    .await
-    .map_err(|e| AppError::Internal(e.into()))?;
+    let server_row: Option<(i64,)> = sqlx::query_as("SELECT server_id FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.db.pg)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
 
     if let Some((server_id,)) = server_row {
         require_permissions(&state, server_id, auth.id, Permissions::VIEW_CHANNEL).await?;
@@ -240,9 +233,7 @@ async fn download_attachment(
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
     // Sanitize filename for Content-Disposition header to prevent header injection
-    let safe_filename = filename
-        .replace('"', "'")
-        .replace(['\n', '\r'], "");
+    let safe_filename = filename.replace('"', "'").replace(['\n', '\r'], "");
 
     // Determine Content-Disposition: inline for safe types, attachment for others
     let disposition = if is_inline_safe(&content_type) {

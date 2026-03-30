@@ -6,10 +6,7 @@ use axum::{
     Json, Router,
 };
 use lumiere_auth::middleware::AuthUser;
-use lumiere_models::{
-    error::AppError,
-    snowflake::Snowflake,
-};
+use lumiere_models::{error::AppError, snowflake::Snowflake};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use validator::Validate;
@@ -109,7 +106,19 @@ async fn get_user(
     _auth: AuthUser,
     Path(user_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let row = sqlx::query_as::<_, (i64, String, i16, Option<String>, Option<String>, Option<String>, i64, bool)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            i16,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            bool,
+        ),
+    >(
         "SELECT id, username, discriminator, avatar, banner, bio, flags, is_bot \
          FROM users WHERE id = $1 AND deleted_at IS NULL",
     )
@@ -134,7 +143,9 @@ async fn get_user(
 /// - absent → `None` (field not in JSON)
 /// - null → `Some(None)` (field is explicitly null)
 /// - "value" → `Some(Some("value"))`
-fn deserialize_optional_nullable<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+fn deserialize_optional_nullable<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -166,7 +177,7 @@ async fn update_me(
     }
 
     // Fix #11: Username rate limit using atomic Lua script
-    if body.username.is_some() {
+    if let Some(ref username_val) = body.username {
         let mut conn = state.redis.clone();
         let key = format!("username_change:{}", auth.id);
 
@@ -185,7 +196,7 @@ async fn update_me(
         }
 
         // Check uniqueness
-        let username = body.username.as_ref().unwrap().trim();
+        let username = username_val.trim();
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1 AND id != $2)",
         )
@@ -234,8 +245,24 @@ async fn update_me(
         sets.join(", ")
     );
 
-    let mut query = sqlx::query_as::<_, (i64, String, i16, String, Option<String>, Option<String>, Option<String>, String, i64, i16, bool, chrono::DateTime<chrono::Utc>)>(&sql)
-        .bind(auth.id);
+    let mut query = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            i16,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            i64,
+            i16,
+            bool,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(&sql)
+    .bind(auth.id);
 
     if let Some(ref username) = body.username {
         query = query.bind(username.trim());
@@ -301,15 +328,16 @@ async fn delete_me(
     }
 
     // Fix #12: Check server ownership before deleting account
-    let owns_servers = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM servers WHERE owner_id = $1)",
-    )
-    .bind(auth.id)
-    .fetch_one(&state.db.pg)
-    .await?;
+    let owns_servers =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM servers WHERE owner_id = $1)")
+            .bind(auth.id)
+            .fetch_one(&state.db.pg)
+            .await?;
 
     if owns_servers {
-        return Err(AppError::BadRequest("Transfer ownership of all servers before deleting your account".into()));
+        return Err(AppError::BadRequest(
+            "Transfer ownership of all servers before deleting your account".into(),
+        ));
     }
 
     // Soft delete — set deleted_at, will be cleaned up after 30 days
@@ -386,7 +414,22 @@ async fn get_relationships(
     State(state): State<Arc<AppState>>,
     auth: AuthUser,
 ) -> Result<impl IntoResponse, AppError> {
-    let rows = sqlx::query_as::<_, (i64, i16, chrono::DateTime<chrono::Utc>, i64, String, i16, Option<String>, Option<String>, Option<String>, i64, bool)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            i16,
+            chrono::DateTime<chrono::Utc>,
+            i64,
+            String,
+            i16,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            bool,
+        ),
+    >(
         "SELECT r.target_id, r.type, r.created_at, \
                 u.id, u.username, u.discriminator, u.avatar, u.banner, u.bio, u.flags, u.is_bot \
          FROM relationships r \
@@ -525,8 +568,14 @@ async fn create_relationship(
             "target_id": target_id,
             "relationship_type": 1
         });
-        let _ = state.nats.publish(&format!("user.{}.relationships", auth.id), &event).await;
-        let _ = state.nats.publish(&format!("user.{}.relationships", target_id), &event).await;
+        let _ = state
+            .nats
+            .publish(&format!("user.{}.relationships", auth.id), &event)
+            .await;
+        let _ = state
+            .nats
+            .publish(&format!("user.{}.relationships", target_id), &event)
+            .await;
 
         return Ok(StatusCode::NO_CONTENT);
     }
@@ -568,8 +617,14 @@ async fn create_relationship(
         "target_id": auth.id.value(),
         "relationship_type": 3
     });
-    let _ = state.nats.publish(&format!("user.{}.relationships", auth.id), &event_out).await;
-    let _ = state.nats.publish(&format!("user.{}.relationships", target_id), &event_in).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.relationships", auth.id), &event_out)
+        .await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.relationships", target_id), &event_in)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -599,8 +654,14 @@ async fn remove_relationship(
         "user_id": auth.id,
         "target_id": target_id
     });
-    let _ = state.nats.publish(&format!("user.{}.relationships", auth.id), &event).await;
-    let _ = state.nats.publish(&format!("user.{}.relationships", target_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.relationships", auth.id), &event)
+        .await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.relationships", target_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -662,7 +723,10 @@ async fn block_user(
         "user_id": auth.id,
         "target_id": target_id
     });
-    let _ = state.nats.publish(&format!("user.{}.relationships", target_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.relationships", target_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -708,7 +772,8 @@ async fn get_dm_channels(
     .fetch_all(&state.db.pg)
     .await?;
 
-    let mut recipient_map: std::collections::HashMap<i64, Vec<PublicUser>> = std::collections::HashMap::new();
+    let mut recipient_map: std::collections::HashMap<i64, Vec<PublicUser>> =
+        std::collections::HashMap::new();
     for r in all_recipients {
         recipient_map.entry(r.0).or_default().push(PublicUser {
             id: Snowflake::from(r.1),
@@ -761,21 +826,23 @@ async fn create_dm_channel(
     };
 
     if recipient_ids.is_empty() {
-        return Err(AppError::BadRequest("Must provide at least one recipient".into()));
+        return Err(AppError::BadRequest(
+            "Must provide at least one recipient".into(),
+        ));
     }
 
     // Group DM max 10 users (including self)
     if recipient_ids.len() > 9 {
-        return Err(AppError::BadRequest(
-            "Group DM limited to 10 users".into(),
-        ));
+        return Err(AppError::BadRequest("Group DM limited to 10 users".into()));
     }
 
     let auth_id_i64 = auth.id.value() as i64;
 
     // Cannot DM yourself
     if recipient_ids.len() == 1 && recipient_ids[0] == auth_id_i64 {
-        return Err(AppError::BadRequest("Cannot create DM with yourself".into()));
+        return Err(AppError::BadRequest(
+            "Cannot create DM with yourself".into(),
+        ));
     }
 
     // Check blocked status for 1:1 DMs
@@ -789,9 +856,7 @@ async fn create_dm_channel(
         .await?;
 
         if blocked {
-            return Err(AppError::Forbidden(
-                "Cannot send DM to this user".into(),
-            ));
+            return Err(AppError::Forbidden("Cannot send DM to this user".into()));
         }
     }
 
@@ -810,7 +875,19 @@ async fn create_dm_channel(
 
         if let Some(channel_id) = existing {
             // Return existing channel
-            let recipient = sqlx::query_as::<_, (i64, String, i16, Option<String>, Option<String>, Option<String>, i64, bool)>(
+            let recipient = sqlx::query_as::<
+                _,
+                (
+                    i64,
+                    String,
+                    i16,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                    i64,
+                    bool,
+                ),
+            >(
                 "SELECT id, username, discriminator, avatar, banner, bio, flags, is_bot \
                  FROM users WHERE id = $1 AND deleted_at IS NULL",
             )
@@ -865,7 +942,19 @@ async fn create_dm_channel(
     }
 
     // Fetch recipient public profiles
-    let recipients = sqlx::query_as::<_, (i64, String, i16, Option<String>, Option<String>, Option<String>, i64, bool)>(
+    let recipients = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            i16,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            bool,
+        ),
+    >(
         "SELECT id, username, discriminator, avatar, banner, bio, flags, is_bot \
          FROM users WHERE id = ANY($1) AND id != $2 AND deleted_at IS NULL",
     )
@@ -923,7 +1012,25 @@ async fn get_settings(
     State(state): State<Arc<AppState>>,
     auth: AuthUser,
 ) -> Result<impl IntoResponse, AppError> {
-    let row = sqlx::query_as::<_, (String, String, String, bool, bool, bool, bool, bool, bool, bool, String, Option<serde_json::Value>, bool, bool)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            bool,
+            bool,
+            bool,
+            bool,
+            bool,
+            bool,
+            bool,
+            String,
+            Option<serde_json::Value>,
+            bool,
+            bool,
+        ),
+    >(
         "SELECT theme, message_display, locale, show_current_game, inline_attachment_media, \
                 inline_embed_media, render_embeds, render_reactions, animate_emoji, enable_tts, \
                 status, custom_status, dm_notifications, friend_request_notifications \
@@ -995,7 +1102,9 @@ async fn update_settings(
             if body.$field.is_some() {
                 sets.push(format!("{} = ${}", $col, param_idx));
                 #[allow(unused_assignments)]
-                { param_idx += 1; }
+                {
+                    param_idx += 1;
+                }
             }
         };
     }
@@ -1027,26 +1136,70 @@ async fn update_settings(
         sets.join(", ")
     );
 
-    let mut query = sqlx::query_as::<_, (String, String, String, bool, bool, bool, bool, bool, bool, bool, String, Option<serde_json::Value>, bool, bool)>(&sql)
-        .bind(auth.id);
+    let mut query = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            bool,
+            bool,
+            bool,
+            bool,
+            bool,
+            bool,
+            bool,
+            String,
+            Option<serde_json::Value>,
+            bool,
+            bool,
+        ),
+    >(&sql)
+    .bind(auth.id);
 
     // Bind in same order as sets
-    if let Some(ref v) = body.theme { query = query.bind(v.as_str()); }
-    if let Some(ref v) = body.message_display { query = query.bind(v.as_str()); }
-    if let Some(ref v) = body.locale { query = query.bind(v.as_str()); }
-    if let Some(v) = body.show_current_game { query = query.bind(v); }
-    if let Some(v) = body.inline_attachment_media { query = query.bind(v); }
-    if let Some(v) = body.inline_embed_media { query = query.bind(v); }
-    if let Some(v) = body.render_embeds { query = query.bind(v); }
-    if let Some(v) = body.render_reactions { query = query.bind(v); }
-    if let Some(v) = body.animate_emoji { query = query.bind(v); }
-    if let Some(v) = body.enable_tts { query = query.bind(v); }
-    if let Some(ref v) = body.status { query = query.bind(v.as_str()); }
+    if let Some(ref v) = body.theme {
+        query = query.bind(v.as_str());
+    }
+    if let Some(ref v) = body.message_display {
+        query = query.bind(v.as_str());
+    }
+    if let Some(ref v) = body.locale {
+        query = query.bind(v.as_str());
+    }
+    if let Some(v) = body.show_current_game {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.inline_attachment_media {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.inline_embed_media {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.render_embeds {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.render_reactions {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.animate_emoji {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.enable_tts {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = body.status {
+        query = query.bind(v.as_str());
+    }
     if let Some(ref v) = body.custom_status {
         query = query.bind(v.as_ref());
     }
-    if let Some(v) = body.dm_notifications { query = query.bind(v); }
-    if let Some(v) = body.friend_request_notifications { query = query.bind(v); }
+    if let Some(v) = body.dm_notifications {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.friend_request_notifications {
+        query = query.bind(v);
+    }
 
     let row = query
         .fetch_optional(&state.db.pg)

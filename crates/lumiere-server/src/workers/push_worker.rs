@@ -29,10 +29,7 @@ pub async fn start(state: Arc<AppState>, cancel: CancellationToken) {
     }
 }
 
-async fn run_consumer(
-    state: &AppState,
-    cancel: &CancellationToken,
-) -> anyhow::Result<()> {
+async fn run_consumer(state: &AppState, cancel: &CancellationToken) -> anyhow::Result<()> {
     let consumer = state
         .nats
         .create_pull_consumer(STREAM_NAME, CONSUMER_NAME, Some(FILTER_SUBJECT))
@@ -161,13 +158,11 @@ async fn process_message(
         content.to_string()
     };
 
-    let notification = PushNotification::new(
-        format!("{} in #{}", author_name, channel_name),
-        body_text,
-    )
-    .with_data("channel_id", channel_id.to_string())
-    .with_data("type", "MESSAGE_CREATE".to_string())
-    .with_thread_id(format!("channel-{}", channel_id));
+    let notification =
+        PushNotification::new(format!("{} in #{}", author_name, channel_name), body_text)
+            .with_data("channel_id", channel_id.to_string())
+            .with_data("type", "MESSAGE_CREATE".to_string())
+            .with_thread_id(format!("channel-{}", channel_id));
 
     if let Some(ref push) = state.push {
         let user_ids: Vec<Snowflake> = offline_recipients

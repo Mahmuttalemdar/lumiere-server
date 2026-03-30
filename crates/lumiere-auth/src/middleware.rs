@@ -33,17 +33,14 @@ where
         state: &Arc<S>,
     ) -> Result<Self, Self::Rejection> {
         let token = extract_bearer_token(parts)?;
-        let claims = jwt::verify_token(&token, state.jwt_secret())
-            .map_err(|_| AuthError::InvalidToken)?;
+        let claims =
+            jwt::verify_token(&token, state.jwt_secret()).map_err(|_| AuthError::InvalidToken)?;
 
         if claims.token_type != TokenType::Access {
             return Err(AuthError::InvalidToken);
         }
 
-        let user_id: Snowflake = claims
-            .sub
-            .parse()
-            .map_err(|_| AuthError::InvalidToken)?;
+        let user_id: Snowflake = claims.sub.parse().map_err(|_| AuthError::InvalidToken)?;
 
         Ok(AuthUser {
             id: user_id,

@@ -127,13 +127,14 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                     break;
                 }
 
-                let payload: IdentifyPayload = match gateway_msg.d.and_then(|d| serde_json::from_value(d).ok()) {
-                    Some(p) => p,
-                    None => {
-                        let _ = tx.try_send(GatewayMessage::invalid_session(false));
-                        break;
-                    }
-                };
+                let payload: IdentifyPayload =
+                    match gateway_msg.d.and_then(|d| serde_json::from_value(d).ok()) {
+                        Some(p) => p,
+                        None => {
+                            let _ = tx.try_send(GatewayMessage::invalid_session(false));
+                            break;
+                        }
+                    };
 
                 match handle_identify(&state, &payload, tx.clone()).await {
                     Ok((s, handles)) => {
@@ -168,13 +169,14 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
             }
 
             OpCode::Resume => {
-                let payload: ResumePayload = match gateway_msg.d.and_then(|d| serde_json::from_value(d).ok()) {
-                    Some(p) => p,
-                    None => {
-                        let _ = tx.try_send(GatewayMessage::invalid_session(false));
-                        break;
-                    }
-                };
+                let payload: ResumePayload =
+                    match gateway_msg.d.and_then(|d| serde_json::from_value(d).ok()) {
+                        Some(p) => p,
+                        None => {
+                            let _ = tx.try_send(GatewayMessage::invalid_session(false));
+                            break;
+                        }
+                    };
 
                 match handle_resume(&state, &payload, tx.clone()).await {
                     Ok((s, handles)) => {
@@ -247,13 +249,19 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             // Check if user has reconnected before broadcasting offline
-            if !state_clone.session_manager.user_sessions.contains_key(&uid.value()) {
+            if !state_clone
+                .session_manager
+                .user_sessions
+                .contains_key(&uid.value())
+            {
                 let event = serde_json::json!({
                     "type": "PRESENCE_UPDATE",
                     "user_id": uid,
                     "status": "offline",
                 });
-                let _ = nats.publish(&format!("user.{}.presence", uid), &event).await;
+                let _ = nats
+                    .publish(&format!("user.{}.presence", uid), &event)
+                    .await;
             }
         });
     }
@@ -357,9 +365,15 @@ async fn handle_identify(
         "user_id": user_id,
         "status": "online",
     });
-    let _ = state.nats.publish(&format!("user.{}.presence", user_id), &presence_event).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.presence", user_id), &presence_event)
+        .await;
     for (server_id, _, _, _, _) in &servers {
-        let _ = state.nats.publish(&format!("server.{}.events", server_id), &presence_event).await;
+        let _ = state
+            .nats
+            .publish(&format!("server.{}.events", server_id), &presence_event)
+            .await;
     }
 
     Ok((session, handles))
@@ -421,13 +435,8 @@ async fn handle_resume(
 
     // Replay missed events before sending RESUMED
     let mut replay_conn = state.redis.clone();
-    let replayed = replay_events(
-        &mut replay_conn,
-        &payload.session_id,
-        payload.sequence,
-        &tx,
-    )
-    .await;
+    let replayed =
+        replay_events(&mut replay_conn, &payload.session_id, payload.sequence, &tx).await;
     tracing::debug!(
         session_id = %payload.session_id,
         last_sequence = payload.sequence,
@@ -437,7 +446,11 @@ async fn handle_resume(
 
     // Send RESUMED event
     let seq = SessionManager::next_sequence(&session);
-    let _ = tx.try_send(GatewayMessage::dispatch("RESUMED", seq, serde_json::json!({})));
+    let _ = tx.try_send(GatewayMessage::dispatch(
+        "RESUMED",
+        seq,
+        serde_json::json!({}),
+    ));
 
     // Re-subscribe to NATS
     let servers = sqlx::query_as::<_, (i64, String, Option<String>, i64, i32)>(
@@ -502,13 +515,12 @@ async fn handle_presence_update(
             .await;
 
         // Also broadcast to all servers the user is in
-        let servers = sqlx::query_scalar::<_, i64>(
-            "SELECT server_id FROM server_members WHERE user_id = $1",
-        )
-        .bind(session.user_id)
-        .fetch_all(&state.db.pg)
-        .await
-        .unwrap_or_default();
+        let servers =
+            sqlx::query_scalar::<_, i64>("SELECT server_id FROM server_members WHERE user_id = $1")
+                .bind(session.user_id)
+                .fetch_all(&state.db.pg)
+                .await
+                .unwrap_or_default();
         for server_id in servers {
             let _ = state
                 .nats
@@ -660,4 +672,3 @@ fn subscribe_and_forward(
         }
     })
 }
-

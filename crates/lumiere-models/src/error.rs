@@ -123,10 +123,9 @@ impl IntoResponse for AppError {
         let mut response = (status, axum::Json(body)).into_response();
 
         if let Some(retry) = retry_after {
-            response.headers_mut().insert(
-                "retry-after",
-                retry.to_string().parse().unwrap(),
-            );
+            response
+                .headers_mut()
+                .insert("retry-after", retry.to_string().parse().unwrap());
         }
 
         response

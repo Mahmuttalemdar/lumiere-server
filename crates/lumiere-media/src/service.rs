@@ -100,6 +100,7 @@ impl MediaService {
     /// before calling this method when security is critical.
     ///
     /// Returns `(object_key, uploaded_bytes)`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn upload_attachment_stream<R>(
         &self,
         channel_id: Snowflake,
@@ -165,8 +166,7 @@ impl MediaService {
     pub async fn download_file_stream(
         &self,
         key: &str,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>, MediaError>
-    {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>, MediaError> {
         validate_key_prefix(key)?;
         let (_status, stream) = self.s3.download_stream(key).await?;
         Ok(stream)
@@ -209,7 +209,10 @@ const ALLOWED_KEY_PREFIXES: &[&str] = &["avatars/", "attachments/", "icons/", "e
 
 /// Validate that an object key starts with an expected prefix to prevent path traversal.
 fn validate_key_prefix(key: &str) -> Result<(), MediaError> {
-    if ALLOWED_KEY_PREFIXES.iter().any(|prefix| key.starts_with(prefix)) {
+    if ALLOWED_KEY_PREFIXES
+        .iter()
+        .any(|prefix| key.starts_with(prefix))
+    {
         Ok(())
     } else {
         Err(MediaError::InvalidContentType(format!(
@@ -221,10 +224,7 @@ fn validate_key_prefix(key: &str) -> Result<(), MediaError> {
 
 /// Strip path components and dangerous characters from a filename.
 fn sanitize_filename(name: &str) -> String {
-    let base = name
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or("file");
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("file");
 
     let sanitized: String = base
         .chars()

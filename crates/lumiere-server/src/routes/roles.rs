@@ -6,17 +6,14 @@ use axum::{
     Json, Router,
 };
 use lumiere_auth::middleware::AuthUser;
-use lumiere_models::{
-    error::AppError,
-    snowflake::Snowflake,
-};
+use lumiere_models::{error::AppError, snowflake::Snowflake};
 use lumiere_permissions::Permissions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use validator::Validate;
 
-use crate::AppState;
 use super::servers::{get_user_permissions, require_member, require_permissions};
+use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -29,8 +26,14 @@ pub fn router() -> Router<Arc<AppState>> {
 
 pub fn channel_permissions_router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/{channel_id}/permissions/{override_id}", put(set_channel_override))
-        .route("/{channel_id}/permissions/{override_id}", delete(delete_channel_override))
+        .route(
+            "/{channel_id}/permissions/{override_id}",
+            put(set_channel_override),
+        )
+        .route(
+            "/{channel_id}/permissions/{override_id}",
+            delete(delete_channel_override),
+        )
 }
 
 // ─── Response types ─────────────────────────────────────────────
@@ -77,7 +80,11 @@ async fn fetch_role(state: &AppState, role_id: i64) -> Result<RoleResponse, AppE
     })
 }
 
-async fn get_actor_highest_position(state: &AppState, server_id: i64, user_id: Snowflake) -> Result<i32, AppError> {
+async fn get_actor_highest_position(
+    state: &AppState,
+    server_id: i64,
+    user_id: Snowflake,
+) -> Result<i32, AppError> {
     // Check if owner first
     let is_owner = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM servers WHERE id = $1 AND owner_id = $2)",
@@ -158,7 +165,9 @@ async fn create_role(
     Json(body): Json<CreateRoleRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if let Err(errors) = body.validate() {
-        return Err(AppError::Validation(crate::routes::validation_errors(errors)));
+        return Err(AppError::Validation(crate::routes::validation_errors(
+            errors,
+        )));
     }
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_ROLES).await?;
@@ -188,7 +197,9 @@ async fn create_role(
         let new_bits = permissions as u64;
         let forbidden_bits = new_bits & !actor_perms.bits();
         if forbidden_bits != 0 {
-            return Err(AppError::Forbidden("Cannot grant permissions you don't have".into()));
+            return Err(AppError::Forbidden(
+                "Cannot grant permissions you don't have".into(),
+            ));
         }
     }
 
@@ -212,7 +223,10 @@ async fn create_role(
         "server_id": server_id,
         "role_id": role_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let role = fetch_role(&state, role_id.value() as i64).await?;
     Ok((StatusCode::CREATED, Json(role)))
@@ -239,14 +253,13 @@ async fn update_role(
 
     // Check role hierarchy — cannot modify roles at or above your position
     let actor_highest = get_actor_highest_position(&state, server_id, auth.id).await?;
-    let role_position = sqlx::query_scalar::<_, i32>(
-        "SELECT position FROM roles WHERE id = $1 AND server_id = $2",
-    )
-    .bind(role_id)
-    .bind(server_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Role not found".into()))?;
+    let role_position =
+        sqlx::query_scalar::<_, i32>("SELECT position FROM roles WHERE id = $1 AND server_id = $2")
+            .bind(role_id)
+            .bind(server_id)
+            .fetch_optional(&state.db.pg)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Role not found".into()))?;
 
     if role_position >= actor_highest && actor_highest != i32::MAX {
         return Err(AppError::Forbidden(
@@ -263,7 +276,9 @@ async fn update_role(
             if body.$field.is_some() {
                 sets.push(format!("{} = ${}", $col, param_idx));
                 #[allow(unused_assignments)]
-                { param_idx += 1; }
+                {
+                    param_idx += 1;
+                }
             }
         };
     }
@@ -288,27 +303,42 @@ async fn update_role(
 
     // Validate and check permission escalation before binding
     let parsed_permissions: Option<i64> = if let Some(ref v) = body.permissions {
-        let bits: i64 = v.parse::<i64>()
+        let bits: i64 = v
+            .parse::<i64>()
             .map_err(|_| AppError::BadRequest("Invalid permissions value".into()))?;
         let actor_perms = get_user_permissions(&state, server_id, auth.id).await?;
         let forbidden_bits = (bits as u64) & !actor_perms.bits();
         if forbidden_bits != 0 {
-            return Err(AppError::Forbidden("Cannot grant permissions you don't have".into()));
+            return Err(AppError::Forbidden(
+                "Cannot grant permissions you don't have".into(),
+            ));
         }
         Some(bits)
     } else {
         None
     };
 
-    if let Some(ref v) = body.name { query = query.bind(v.trim()); }
-    if let Some(v) = body.color { query = query.bind(v); }
-    if let Some(v) = body.hoist { query = query.bind(v); }
-    if let Some(ref v) = body.icon { query = query.bind(v.as_deref()); }
-    if let Some(v) = body.mentionable { query = query.bind(v); }
+    if let Some(ref v) = body.name {
+        query = query.bind(v.trim());
+    }
+    if let Some(v) = body.color {
+        query = query.bind(v);
+    }
+    if let Some(v) = body.hoist {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = body.icon {
+        query = query.bind(v.as_deref());
+    }
+    if let Some(v) = body.mentionable {
+        query = query.bind(v);
+    }
     if let Some(bits) = parsed_permissions {
         query = query.bind(bits);
     }
-    if let Some(v) = body.position { query = query.bind(v); }
+    if let Some(v) = body.position {
+        query = query.bind(v);
+    }
 
     query.execute(&state.db.pg).await?;
 
@@ -317,7 +347,10 @@ async fn update_role(
         "server_id": server_id,
         "role_id": role_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let role = fetch_role(&state, role_id).await?;
     Ok(Json(role))
@@ -341,17 +374,17 @@ async fn delete_role(
     .ok_or_else(|| AppError::NotFound("Role not found".into()))?;
 
     if is_default {
-        return Err(AppError::BadRequest("Cannot delete the @everyone role".into()));
+        return Err(AppError::BadRequest(
+            "Cannot delete the @everyone role".into(),
+        ));
     }
 
     // Check hierarchy
     let actor_highest = get_actor_highest_position(&state, server_id, auth.id).await?;
-    let role_position = sqlx::query_scalar::<_, i32>(
-        "SELECT position FROM roles WHERE id = $1",
-    )
-    .bind(role_id)
-    .fetch_one(&state.db.pg)
-    .await?;
+    let role_position = sqlx::query_scalar::<_, i32>("SELECT position FROM roles WHERE id = $1")
+        .bind(role_id)
+        .fetch_one(&state.db.pg)
+        .await?;
 
     if role_position >= actor_highest && actor_highest != i32::MAX {
         return Err(AppError::Forbidden(
@@ -370,7 +403,10 @@ async fn delete_role(
         "server_id": server_id,
         "role_id": role_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -439,20 +475,23 @@ async fn set_channel_override(
     Path((channel_id, override_id)): Path<(i64, i64)>,
     Json(body): Json<SetOverrideRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let server_id = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT server_id FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
-    .ok_or_else(|| AppError::BadRequest("Cannot set overrides on DM channels".into()))?;
+    let server_id =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT server_id FROM channels WHERE id = $1")
+            .bind(channel_id)
+            .fetch_optional(&state.db.pg)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
+            .ok_or_else(|| AppError::BadRequest("Cannot set overrides on DM channels".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_ROLES).await?;
 
-    let allow_bits: i64 = body.allow.parse::<i64>()
+    let allow_bits: i64 = body
+        .allow
+        .parse::<i64>()
         .map_err(|_| AppError::BadRequest("Invalid allow permissions value".into()))?;
-    let deny_bits: i64 = body.deny.parse::<i64>()
+    let deny_bits: i64 = body
+        .deny
+        .parse::<i64>()
         .map_err(|_| AppError::BadRequest("Invalid deny permissions value".into()))?;
 
     // Strip ADMINISTRATOR bit from overrides
@@ -464,7 +503,9 @@ async fn set_channel_override(
     let all_bits = (allow_bits as u64) | (deny_bits as u64);
     let forbidden_bits = all_bits & !actor_perms.bits();
     if forbidden_bits != 0 {
-        return Err(AppError::Forbidden("Cannot set permissions you don't have".into()));
+        return Err(AppError::Forbidden(
+            "Cannot set permissions you don't have".into(),
+        ));
     }
 
     sqlx::query(
@@ -488,14 +529,13 @@ async fn delete_channel_override(
     auth: AuthUser,
     Path((channel_id, override_id)): Path<(i64, i64)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let server_id = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT server_id FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
-    .ok_or_else(|| AppError::BadRequest("Cannot modify DM channels".into()))?;
+    let server_id =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT server_id FROM channels WHERE id = $1")
+            .bind(channel_id)
+            .fetch_optional(&state.db.pg)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
+            .ok_or_else(|| AppError::BadRequest("Cannot modify DM channels".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_ROLES).await?;
 

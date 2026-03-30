@@ -1,10 +1,11 @@
-use axum::{extract::{FromRequest, State}, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
-use lumiere_auth::{
-    jwt,
-    middleware::AuthUser,
-    password,
-    session::SessionManager,
+use axum::{
+    extract::{FromRequest, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
 };
+use lumiere_auth::{jwt, middleware::AuthUser, password, session::SessionManager};
 use lumiere_models::error::{AppError, FieldError};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -107,22 +108,19 @@ async fn register(
     }
 
     // Hash password
-    let password_hash = password::hash_password(&body.password)
-        .map_err(AppError::Internal)?;
+    let password_hash = password::hash_password(&body.password).map_err(AppError::Internal)?;
 
     // Generate ID
     let user_id = state.snowflake.next_id();
 
     // Insert user
-    sqlx::query(
-        "INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(user_id)
-    .bind(&username)
-    .bind(&email)
-    .bind(&password_hash)
-    .execute(&state.db.pg)
-    .await?;
+    sqlx::query("INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4)")
+        .bind(user_id)
+        .bind(&username)
+        .bind(&email)
+        .bind(&password_hash)
+        .execute(&state.db.pg)
+        .await?;
 
     // Create default settings
     sqlx::query("INSERT INTO user_settings (user_id) VALUES ($1)")
@@ -131,13 +129,19 @@ async fn register(
         .await?;
 
     // Generate tokens
-    let (access_token, _) =
-        jwt::create_access_token(user_id, &state.config.auth.jwt_secret, state.config.auth.access_token_ttl)
-            .map_err(AppError::Internal)?;
+    let (access_token, _) = jwt::create_access_token(
+        user_id,
+        &state.config.auth.jwt_secret,
+        state.config.auth.access_token_ttl,
+    )
+    .map_err(AppError::Internal)?;
 
-    let (refresh_token, refresh_jti) =
-        jwt::create_refresh_token(user_id, &state.config.auth.jwt_secret, state.config.auth.refresh_token_ttl)
-            .map_err(AppError::Internal)?;
+    let (refresh_token, refresh_jti) = jwt::create_refresh_token(
+        user_id,
+        &state.config.auth.jwt_secret,
+        state.config.auth.refresh_token_ttl,
+    )
+    .map_err(AppError::Internal)?;
 
     // Store refresh session
     let session_mgr = SessionManager::new(state.redis.clone());
@@ -212,8 +216,8 @@ async fn login(
     let user_id = lumiere_models::snowflake::Snowflake::from(user_id_raw);
 
     // Verify password
-    let valid = password::verify_password(&body.password, &password_hash)
-        .map_err(AppError::Internal)?;
+    let valid =
+        password::verify_password(&body.password, &password_hash).map_err(AppError::Internal)?;
 
     if !valid {
         let mut redis = state.redis.clone();
@@ -226,13 +230,19 @@ async fn login(
     let _ = rate_limit::clear_login_failures(&mut redis, &client_ip).await;
 
     // Generate tokens
-    let (access_token, _) =
-        jwt::create_access_token(user_id, &state.config.auth.jwt_secret, state.config.auth.access_token_ttl)
-            .map_err(AppError::Internal)?;
+    let (access_token, _) = jwt::create_access_token(
+        user_id,
+        &state.config.auth.jwt_secret,
+        state.config.auth.access_token_ttl,
+    )
+    .map_err(AppError::Internal)?;
 
-    let (refresh_token, refresh_jti) =
-        jwt::create_refresh_token(user_id, &state.config.auth.jwt_secret, state.config.auth.refresh_token_ttl)
-            .map_err(AppError::Internal)?;
+    let (refresh_token, refresh_jti) = jwt::create_refresh_token(
+        user_id,
+        &state.config.auth.jwt_secret,
+        state.config.auth.refresh_token_ttl,
+    )
+    .map_err(AppError::Internal)?;
 
     // Store refresh session
     let session_mgr = SessionManager::new(state.redis.clone());
@@ -282,7 +292,9 @@ async fn refresh(
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::Unauthorized("Session revoked".into()))?;
 
-    let user_id: lumiere_models::snowflake::Snowflake = session.user_id.parse()
+    let user_id: lumiere_models::snowflake::Snowflake = session
+        .user_id
+        .parse()
         .map_err(|_| AppError::Internal(anyhow::anyhow!("Invalid user_id in session")))?;
 
     // Revoke old refresh token (rotation)
@@ -292,13 +304,19 @@ async fn refresh(
         .map_err(AppError::Internal)?;
 
     // Issue new tokens
-    let (access_token, _) =
-        jwt::create_access_token(user_id, &state.config.auth.jwt_secret, state.config.auth.access_token_ttl)
-            .map_err(AppError::Internal)?;
+    let (access_token, _) = jwt::create_access_token(
+        user_id,
+        &state.config.auth.jwt_secret,
+        state.config.auth.access_token_ttl,
+    )
+    .map_err(AppError::Internal)?;
 
-    let (refresh_token, refresh_jti) =
-        jwt::create_refresh_token(user_id, &state.config.auth.jwt_secret, state.config.auth.refresh_token_ttl)
-            .map_err(AppError::Internal)?;
+    let (refresh_token, refresh_jti) = jwt::create_refresh_token(
+        user_id,
+        &state.config.auth.jwt_secret,
+        state.config.auth.refresh_token_ttl,
+    )
+    .map_err(AppError::Internal)?;
 
     // Store new session
     session_mgr

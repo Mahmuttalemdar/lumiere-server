@@ -6,10 +6,7 @@ use axum::{
     Json, Router,
 };
 use lumiere_auth::middleware::AuthUser;
-use lumiere_models::{
-    error::AppError,
-    snowflake::Snowflake,
-};
+use lumiere_models::{error::AppError, snowflake::Snowflake};
 use lumiere_permissions::Permissions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -39,9 +36,18 @@ pub fn router() -> Router<Arc<AppState>> {
         // Invites
         .route("/{server_id}/invites", get(get_server_invites))
         // Channel management (delegated to channels module)
-        .route("/{server_id}/channels", get(super::channels::get_server_channels))
-        .route("/{server_id}/channels", post(super::channels::create_channel))
-        .route("/{server_id}/channels/reorder", patch(super::channels::reorder_channels))
+        .route(
+            "/{server_id}/channels",
+            get(super::channels::get_server_channels),
+        )
+        .route(
+            "/{server_id}/channels",
+            post(super::channels::create_channel),
+        )
+        .route(
+            "/{server_id}/channels/reorder",
+            patch(super::channels::reorder_channels),
+        )
 }
 
 /// Invite routes mounted under /api/v1/invites and /api/v1/channels
@@ -53,8 +59,7 @@ pub fn invite_router() -> Router<Arc<AppState>> {
 }
 
 pub fn channel_invite_router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/{channel_id}/invites", post(create_invite))
+    Router::new().route("/{channel_id}/invites", post(create_invite))
 }
 
 // ─── Response types ─────────────────────────────────────────────
@@ -112,7 +117,11 @@ pub struct InviteResponse {
 // ─── Helpers ────────────────────────────────────────────────────
 
 /// Check if user is a member of the server
-pub async fn require_member(state: &AppState, server_id: i64, user_id: Snowflake) -> Result<(), AppError> {
+pub async fn require_member(
+    state: &AppState,
+    server_id: i64,
+    user_id: Snowflake,
+) -> Result<(), AppError> {
     let is_member = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM server_members WHERE server_id = $1 AND user_id = $2)",
     )
@@ -128,7 +137,11 @@ pub async fn require_member(state: &AppState, server_id: i64, user_id: Snowflake
 }
 
 /// Get the computed permissions for a user in a server
-pub async fn get_user_permissions(state: &AppState, server_id: i64, user_id: Snowflake) -> Result<Permissions, AppError> {
+pub async fn get_user_permissions(
+    state: &AppState,
+    server_id: i64,
+    user_id: Snowflake,
+) -> Result<Permissions, AppError> {
     // Check if owner
     let is_owner = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM servers WHERE id = $1 AND owner_id = $2)",
@@ -184,7 +197,12 @@ pub async fn require_permissions(
 
 /// Check role hierarchy: actor must have a strictly higher role than target.
 /// Server owner bypasses hierarchy checks.
-pub async fn check_role_hierarchy(state: &AppState, server_id: i64, actor_id: Snowflake, target_id: i64) -> Result<(), AppError> {
+pub async fn check_role_hierarchy(
+    state: &AppState,
+    server_id: i64,
+    actor_id: Snowflake,
+    target_id: i64,
+) -> Result<(), AppError> {
     // Owner bypasses hierarchy
     let is_owner = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM servers WHERE id = $1 AND owner_id = $2)",
@@ -217,7 +235,9 @@ pub async fn check_role_hierarchy(state: &AppState, server_id: i64, actor_id: Sn
     .unwrap_or(0);
 
     if actor_highest <= target_highest {
-        return Err(AppError::Forbidden("Cannot modify a member with equal or higher role".into()));
+        return Err(AppError::Forbidden(
+            "Cannot modify a member with equal or higher role".into(),
+        ));
     }
 
     Ok(())
@@ -239,19 +259,22 @@ async fn create_server(
     Json(body): Json<CreateServerRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if let Err(errors) = body.validate() {
-        return Err(AppError::Validation(crate::routes::validation_errors(errors)));
+        return Err(AppError::Validation(crate::routes::validation_errors(
+            errors,
+        )));
     }
 
     // Fix #10: Server creation limit — max 100 servers per user
-    let server_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM server_members WHERE user_id = $1",
-    )
-    .bind(auth.id)
-    .fetch_one(&state.db.pg)
-    .await?;
+    let server_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM server_members WHERE user_id = $1")
+            .bind(auth.id)
+            .fetch_one(&state.db.pg)
+            .await?;
 
     if server_count >= 100 {
-        return Err(AppError::BadRequest("You have reached the maximum number of servers (100)".into()));
+        return Err(AppError::BadRequest(
+            "You have reached the maximum number of servers (100)".into(),
+        ));
     }
 
     let server_id = state.snowflake.next_id();
@@ -313,22 +336,18 @@ async fn create_server(
         .await?;
 
     // Add creator as member
-    sqlx::query(
-        "INSERT INTO server_members (server_id, user_id) VALUES ($1, $2)",
-    )
-    .bind(server_id)
-    .bind(auth.id)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("INSERT INTO server_members (server_id, user_id) VALUES ($1, $2)")
+        .bind(server_id)
+        .bind(auth.id)
+        .execute(&mut *tx)
+        .await?;
 
     // Assign @everyone role to creator
-    sqlx::query(
-        "INSERT INTO member_roles (server_id, user_id, role_id) VALUES ($1, $2, $1)",
-    )
-    .bind(server_id)
-    .bind(auth.id)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("INSERT INTO member_roles (server_id, user_id, role_id) VALUES ($1, $2, $1)")
+        .bind(server_id)
+        .bind(auth.id)
+        .execute(&mut *tx)
+        .await?;
 
     tx.commit().await?;
 
@@ -338,14 +357,37 @@ async fn create_server(
         "server_id": server_id,
         "user_id": auth.id,
     });
-    let _ = state.nats.publish(&format!("user.{}.guilds", auth.id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.guilds", auth.id), &event)
+        .await;
 
     let server = fetch_server(&state, server_id).await?;
     Ok((StatusCode::CREATED, Json(server)))
 }
 
 async fn fetch_server(state: &AppState, server_id: Snowflake) -> Result<ServerResponse, AppError> {
-    let row = sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, Option<String>, i64, Option<String>, Vec<String>, i16, i16, i16, Option<i64>, Option<i64>, i32, i32, chrono::DateTime<chrono::Utc>)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            Option<String>,
+            Vec<String>,
+            i16,
+            i16,
+            i16,
+            Option<i64>,
+            Option<i64>,
+            i32,
+            i32,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         "SELECT id, name, icon, banner, description, owner_id, region, features, \
                 verification_level, default_message_notifications, explicit_content_filter, \
                 system_channel_id, rules_channel_id, max_members, member_count, created_at \
@@ -408,7 +450,7 @@ async fn update_server(
     Json(body): Json<UpdateServerRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     // Fix #5: Ownership transfer requires being the owner
-    if body.owner_id.is_some() {
+    if let Some(new_owner) = body.owner_id {
         let is_owner = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM servers WHERE id = $1 AND owner_id = $2)",
         )
@@ -418,10 +460,10 @@ async fn update_server(
         .await?;
 
         if !is_owner {
-            return Err(AppError::Forbidden("Only the owner can transfer ownership".into()));
+            return Err(AppError::Forbidden(
+                "Only the owner can transfer ownership".into(),
+            ));
         }
-
-        let new_owner = body.owner_id.unwrap();
         // Verify new owner is a member
         require_member(&state, server_id, Snowflake::from(new_owner)).await?;
 
@@ -457,7 +499,9 @@ async fn update_server(
             if body.$field.is_some() {
                 sets.push(format!("{} = ${}", $col, param_idx));
                 #[allow(unused_assignments)]
-                { param_idx += 1; }
+                {
+                    param_idx += 1;
+                }
             }
         };
     }
@@ -468,7 +512,10 @@ async fn update_server(
     add_set!(description, "description");
     add_set!(region, "region");
     add_set!(verification_level, "verification_level");
-    add_set!(default_message_notifications, "default_message_notifications");
+    add_set!(
+        default_message_notifications,
+        "default_message_notifications"
+    );
     add_set!(explicit_content_filter, "explicit_content_filter");
     add_set!(system_channel_id, "system_channel_id");
     add_set!(rules_channel_id, "rules_channel_id");
@@ -477,23 +524,46 @@ async fn update_server(
         let sql = format!("UPDATE servers SET {} WHERE id = $1", sets.join(", "));
         let mut query = sqlx::query(&sql).bind(server_id);
 
-        if let Some(ref v) = body.name { query = query.bind(v.trim()); }
-        if let Some(ref v) = body.icon { query = query.bind(v.as_deref()); }
-        if let Some(ref v) = body.banner { query = query.bind(v.as_deref()); }
-        if let Some(ref v) = body.description { query = query.bind(v.as_deref()); }
-        if let Some(ref v) = body.region { query = query.bind(v.as_deref()); }
-        if let Some(v) = body.verification_level { query = query.bind(v); }
-        if let Some(v) = body.default_message_notifications { query = query.bind(v); }
-        if let Some(v) = body.explicit_content_filter { query = query.bind(v); }
-        if let Some(ref v) = body.system_channel_id { query = query.bind(*v); }
-        if let Some(ref v) = body.rules_channel_id { query = query.bind(*v); }
+        if let Some(ref v) = body.name {
+            query = query.bind(v.trim());
+        }
+        if let Some(ref v) = body.icon {
+            query = query.bind(v.as_deref());
+        }
+        if let Some(ref v) = body.banner {
+            query = query.bind(v.as_deref());
+        }
+        if let Some(ref v) = body.description {
+            query = query.bind(v.as_deref());
+        }
+        if let Some(ref v) = body.region {
+            query = query.bind(v.as_deref());
+        }
+        if let Some(v) = body.verification_level {
+            query = query.bind(v);
+        }
+        if let Some(v) = body.default_message_notifications {
+            query = query.bind(v);
+        }
+        if let Some(v) = body.explicit_content_filter {
+            query = query.bind(v);
+        }
+        if let Some(ref v) = body.system_channel_id {
+            query = query.bind(*v);
+        }
+        if let Some(ref v) = body.rules_channel_id {
+            query = query.bind(*v);
+        }
 
         query.execute(&state.db.pg).await?;
     }
 
     // Dispatch GUILD_UPDATE
     let event = serde_json::json!({ "type": "GUILD_UPDATE", "server_id": server_id });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let server = fetch_server(&state, Snowflake::from(server_id)).await?;
     Ok(Json(server))
@@ -520,16 +590,17 @@ async fn delete_server(
     .await?;
 
     if !is_owner {
-        return Err(AppError::Forbidden("Only the owner can delete a server".into()));
+        return Err(AppError::Forbidden(
+            "Only the owner can delete a server".into(),
+        ));
     }
 
     // Verify password
-    let password_hash = sqlx::query_scalar::<_, String>(
-        "SELECT password_hash FROM users WHERE id = $1",
-    )
-    .bind(auth.id)
-    .fetch_one(&state.db.pg)
-    .await?;
+    let password_hash =
+        sqlx::query_scalar::<_, String>("SELECT password_hash FROM users WHERE id = $1")
+            .bind(auth.id)
+            .fetch_one(&state.db.pg)
+            .await?;
 
     let valid = lumiere_auth::password::verify_password(&body.password, &password_hash)
         .map_err(AppError::Internal)?;
@@ -540,7 +611,10 @@ async fn delete_server(
 
     // Dispatch GUILD_DELETE before cascade
     let event = serde_json::json!({ "type": "GUILD_DELETE", "server_id": server_id });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     // Delete server (CASCADE handles channels, roles, members, bans, invites)
     sqlx::query("DELETE FROM servers WHERE id = $1")
@@ -570,7 +644,24 @@ async fn get_members(
     let limit = query.limit.unwrap_or(100).min(1000);
     let after = query.after.unwrap_or(0);
 
-    let rows = sqlx::query_as::<_, (i64, String, i16, Option<String>, Option<String>, Option<String>, i64, bool, Option<String>, Option<String>, chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>, i64)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            i16,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            bool,
+            Option<String>,
+            Option<String>,
+            chrono::DateTime<chrono::Utc>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            i64,
+        ),
+    >(
         "SELECT u.id, u.username, u.discriminator, u.avatar, u.banner, u.bio, u.flags, u.is_bot, \
                 sm.nickname, sm.avatar, sm.joined_at, sm.communication_disabled_until, sm.flags \
          FROM server_members sm \
@@ -595,7 +686,8 @@ async fn get_members(
     .fetch_all(&state.db.pg)
     .await?;
 
-    let mut role_map: std::collections::HashMap<i64, Vec<Snowflake>> = std::collections::HashMap::new();
+    let mut role_map: std::collections::HashMap<i64, Vec<Snowflake>> =
+        std::collections::HashMap::new();
     for (uid, rid) in all_roles {
         role_map.entry(uid).or_default().push(Snowflake::from(rid));
     }
@@ -633,7 +725,24 @@ async fn get_member(
 ) -> Result<impl IntoResponse, AppError> {
     require_member(&state, server_id, auth.id).await?;
 
-    let row = sqlx::query_as::<_, (i64, String, i16, Option<String>, Option<String>, Option<String>, i64, bool, Option<String>, Option<String>, chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>, i64)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            i16,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            bool,
+            Option<String>,
+            Option<String>,
+            chrono::DateTime<chrono::Utc>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            i64,
+        ),
+    >(
         "SELECT u.id, u.username, u.discriminator, u.avatar, u.banner, u.bio, u.flags, u.is_bot, \
                 sm.nickname, sm.avatar, sm.joined_at, sm.communication_disabled_until, sm.flags \
          FROM server_members sm \
@@ -698,35 +807,42 @@ async fn update_member(
     if body.nickname.is_some() {
         let is_self = user_id == auth.id.value() as i64;
         if is_self && !perms.contains(Permissions::CHANGE_NICKNAME) {
-            return Err(AppError::Forbidden("Missing CHANGE_NICKNAME permission".into()));
+            return Err(AppError::Forbidden(
+                "Missing CHANGE_NICKNAME permission".into(),
+            ));
         }
         if !is_self && !perms.contains(Permissions::MANAGE_NICKNAMES) {
-            return Err(AppError::Forbidden("Missing MANAGE_NICKNAMES permission".into()));
+            return Err(AppError::Forbidden(
+                "Missing MANAGE_NICKNAMES permission".into(),
+            ));
         }
     }
 
     // Role changes
-    if body.roles.is_some() {
-        if !perms.contains(Permissions::MANAGE_ROLES) {
-            return Err(AppError::Forbidden("Missing MANAGE_ROLES permission".into()));
-        }
+    if body.roles.is_some() && !perms.contains(Permissions::MANAGE_ROLES) {
+        return Err(AppError::Forbidden(
+            "Missing MANAGE_ROLES permission".into(),
+        ));
     }
 
     // Timeout changes
-    if body.communication_disabled_until.is_some() {
-        if !perms.contains(Permissions::MODERATE_MEMBERS) {
-            return Err(AppError::Forbidden("Missing MODERATE_MEMBERS permission".into()));
-        }
+    if body.communication_disabled_until.is_some() && !perms.contains(Permissions::MODERATE_MEMBERS)
+    {
+        return Err(AppError::Forbidden(
+            "Missing MODERATE_MEMBERS permission".into(),
+        ));
     }
 
     // Apply nickname
     if let Some(ref nickname) = body.nickname {
-        sqlx::query("UPDATE server_members SET nickname = $1 WHERE server_id = $2 AND user_id = $3")
-            .bind(nickname.as_deref())
-            .bind(server_id)
-            .bind(user_id)
-            .execute(&state.db.pg)
-            .await?;
+        sqlx::query(
+            "UPDATE server_members SET nickname = $1 WHERE server_id = $2 AND user_id = $3",
+        )
+        .bind(nickname.as_deref())
+        .bind(server_id)
+        .bind(user_id)
+        .execute(&state.db.pg)
+        .await?;
     }
 
     // Apply timeout
@@ -742,11 +858,13 @@ async fn update_member(
     // Apply role changes
     if let Some(ref role_ids) = body.roles {
         // Remove existing roles (except @everyone)
-        sqlx::query("DELETE FROM member_roles WHERE server_id = $1 AND user_id = $2 AND role_id != $1")
-            .bind(server_id)
-            .bind(user_id)
-            .execute(&state.db.pg)
-            .await?;
+        sqlx::query(
+            "DELETE FROM member_roles WHERE server_id = $1 AND user_id = $2 AND role_id != $1",
+        )
+        .bind(server_id)
+        .bind(user_id)
+        .execute(&state.db.pg)
+        .await?;
 
         // Add new roles
         for role_id in role_ids {
@@ -767,7 +885,10 @@ async fn update_member(
         "server_id": server_id,
         "user_id": user_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     // Return updated member
     get_member(State(state), auth, Path((server_id, user_id))).await
@@ -787,12 +908,14 @@ async fn update_self_member(
     require_permissions(&state, server_id, auth.id, Permissions::CHANGE_NICKNAME).await?;
 
     if let Some(ref nickname) = body.nickname {
-        sqlx::query("UPDATE server_members SET nickname = $1 WHERE server_id = $2 AND user_id = $3")
-            .bind(nickname.as_deref())
-            .bind(server_id)
-            .bind(auth.id)
-            .execute(&state.db.pg)
-            .await?;
+        sqlx::query(
+            "UPDATE server_members SET nickname = $1 WHERE server_id = $2 AND user_id = $3",
+        )
+        .bind(nickname.as_deref())
+        .bind(server_id)
+        .bind(auth.id)
+        .execute(&state.db.pg)
+        .await?;
     }
 
     let event = serde_json::json!({
@@ -800,7 +923,10 @@ async fn update_self_member(
         "server_id": server_id,
         "user_id": auth.id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let user_id = auth.id.value() as i64;
     get_member(State(state), auth, Path((server_id, user_id))).await
@@ -853,13 +979,19 @@ async fn kick_member(
         "server_id": server_id,
         "user_id": user_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let guild_delete = serde_json::json!({
         "type": "GUILD_DELETE",
         "server_id": server_id,
     });
-    let _ = state.nats.publish(&format!("user.{}.guilds", user_id), &guild_delete).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.guilds", user_id), &guild_delete)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -907,7 +1039,10 @@ async fn leave_server(
         "server_id": server_id,
         "user_id": auth.id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1050,10 +1185,16 @@ async fn create_ban(
         "server_id": server_id,
         "user_id": user_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let guild_delete = serde_json::json!({ "type": "GUILD_DELETE", "server_id": server_id });
-    let _ = state.nats.publish(&format!("user.{}.guilds", user_id), &guild_delete).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.guilds", user_id), &guild_delete)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1080,7 +1221,10 @@ async fn remove_ban(
         "server_id": server_id,
         "user_id": user_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1101,13 +1245,11 @@ async fn create_invite(
     Json(body): Json<CreateInviteRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     // Get server_id from channel
-    let server_id = sqlx::query_scalar::<_, i64>(
-        "SELECT server_id FROM channels WHERE id = $1",
-    )
-    .bind(channel_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let server_id = sqlx::query_scalar::<_, i64>("SELECT server_id FROM channels WHERE id = $1")
+        .bind(channel_id)
+        .fetch_optional(&state.db.pg)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::CREATE_INVITE).await?;
 
@@ -1137,7 +1279,10 @@ async fn create_invite(
         "server_id": server_id,
         "channel_id": channel_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     Ok((
         StatusCode::CREATED,
@@ -1260,14 +1405,15 @@ async fn use_invite(
     // Fix #2: Wrap use_invite in a transaction with SELECT ... FOR UPDATE
     let mut tx = state.db.pg.begin().await?;
 
-    let invite = sqlx::query_as::<_, (i64, i64, i32, i32, i32, bool, chrono::DateTime<chrono::Utc>)>(
-        "SELECT server_id, channel_id, max_age, max_uses, uses, temporary, created_at \
+    let invite =
+        sqlx::query_as::<_, (i64, i64, i32, i32, i32, bool, chrono::DateTime<chrono::Utc>)>(
+            "SELECT server_id, channel_id, max_age, max_uses, uses, temporary, created_at \
          FROM invites WHERE code = $1 FOR UPDATE",
-    )
-    .bind(&code)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Invite not found".into()))?;
+        )
+        .bind(&code)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Invite not found".into()))?;
 
     let server_id = invite.0;
 
@@ -1310,7 +1456,9 @@ async fn use_invite(
     .await?;
 
     if is_banned {
-        return Err(AppError::Forbidden("You are banned from this server".into()));
+        return Err(AppError::Forbidden(
+            "You are banned from this server".into(),
+        ));
     }
 
     // Add as member
@@ -1346,13 +1494,19 @@ async fn use_invite(
         "server_id": server_id,
         "user_id": auth.id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &member_event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &member_event)
+        .await;
 
     let guild_event = serde_json::json!({
         "type": "GUILD_CREATE",
         "server_id": server_id,
     });
-    let _ = state.nats.publish(&format!("user.{}.guilds", auth.id), &guild_event).await;
+    let _ = state
+        .nats
+        .publish(&format!("user.{}.guilds", auth.id), &guild_event)
+        .await;
 
     let server = fetch_server(&state, Snowflake::from(server_id)).await?;
     Ok(Json(server))
@@ -1391,7 +1545,10 @@ async fn delete_invite(
         "code": code,
         "server_id": server_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

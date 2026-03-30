@@ -28,10 +28,7 @@ pub async fn start(state: Arc<AppState>, cancel: CancellationToken) {
     }
 }
 
-async fn run_consumer(
-    state: &AppState,
-    cancel: &CancellationToken,
-) -> anyhow::Result<()> {
+async fn run_consumer(state: &AppState, cancel: &CancellationToken) -> anyhow::Result<()> {
     let consumer = state
         .nats
         .create_pull_consumer(STREAM_NAME, CONSUMER_NAME, Some(FILTER_SUBJECT))
@@ -133,7 +130,10 @@ async fn process_message(
             // For now we log it; a full implementation would query ScyllaDB and
             // re-index the updated content.
             let message_id = event["message_id"].as_i64().unwrap_or(0);
-            tracing::debug!(message_id, "MESSAGE_UPDATE received — re-indexing not yet wired");
+            tracing::debug!(
+                message_id,
+                "MESSAGE_UPDATE received — re-indexing not yet wired"
+            );
         }
         "MESSAGE_DELETE" => {
             let message_id = event["message_id"].as_i64().unwrap_or(0);
@@ -152,15 +152,16 @@ async fn process_message(
                     for id_val in ids {
                         let mid = id_val.as_i64().unwrap_or(0);
                         if mid != 0 {
-                            if let Err(e) =
-                                search.delete_message(Snowflake::from(mid)).await
-                            {
+                            if let Err(e) = search.delete_message(Snowflake::from(mid)).await {
                                 tracing::warn!(error = %e, message_id = mid, "Failed to bulk-delete message from index");
                             }
                         }
                     }
                 }
-                tracing::debug!(count = ids.len(), "Bulk-removed messages from Meilisearch index");
+                tracing::debug!(
+                    count = ids.len(),
+                    "Bulk-removed messages from Meilisearch index"
+                );
             }
         }
         _ => {

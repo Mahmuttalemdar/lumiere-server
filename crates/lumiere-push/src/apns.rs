@@ -80,9 +80,8 @@ impl ApnsClient {
             PushError::ApnsError(format!("Failed to read APNs key at {}: {}", key_path, e))
         })?;
 
-        let signing_key = EncodingKey::from_ec_pem(&key_data).map_err(|e| {
-            PushError::ApnsError(format!("Failed to parse APNs ES256 key: {}", e))
-        })?;
+        let signing_key = EncodingKey::from_ec_pem(&key_data)
+            .map_err(|e| PushError::ApnsError(format!("Failed to parse APNs ES256 key: {}", e)))?;
 
         let base_url = if sandbox {
             APNS_SANDBOX_URL
@@ -222,15 +221,15 @@ impl ApnsClient {
 
         match status.as_u16() {
             200 => {
-                debug!(
-                    token = &device_token[..8],
-                    "APNs notification delivered"
-                );
+                debug!(token = &device_token[..8], "APNs notification delivered");
                 Ok(())
             }
             401 | 403 => {
                 // Token expired/invalid — invalidate cache and retry once.
-                warn!(status = status.as_u16(), "APNs auth failed, invalidating cached token and retrying");
+                warn!(
+                    status = status.as_u16(),
+                    "APNs auth failed, invalidating cached token and retrying"
+                );
                 *self.cached_token.write().await = None;
 
                 let fresh_jwt = self.get_or_refresh_token().await?;
@@ -244,8 +243,7 @@ impl ApnsClient {
                     let body = retry_response.text().await.unwrap_or_default();
                     Err(PushError::ApnsError(format!(
                         "APNs retry failed after token refresh ({}): {}",
-                        status_code,
-                        body
+                        status_code, body
                     )))
                 }
             }

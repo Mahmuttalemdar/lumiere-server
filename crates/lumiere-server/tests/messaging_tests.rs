@@ -1,5 +1,5 @@
 mod common;
-use common::{get_test_app, unique_name, unique_email};
+use common::{get_test_app, unique_email, unique_name};
 
 use common::TestApp;
 use serde_json::json;
@@ -13,9 +13,7 @@ async fn setup_server_with_channel(app: &TestApp) -> (String, i64, i64) {
     let (token, _user_id) = app
         .register_user(&name, &unique_email(&name), "testpassword123")
         .await;
-    let server_id = app
-        .create_server(&token, &unique_name("server"))
-        .await;
+    let server_id = app.create_server(&token, &unique_name("server")).await;
 
     // Get channel list to find the default general channel
     let res = app
@@ -89,7 +87,10 @@ async fn add_member_to_server(
 ) {
     // Get the server's first channel to create an invite
     let res = app
-        .get(owner_token, &format!("/api/v1/servers/{}/channels", server_id))
+        .get(
+            owner_token,
+            &format!("/api/v1/servers/{}/channels", server_id),
+        )
         .await;
     assert_eq!(res.status(), 200, "get channels failed");
     let channels: Vec<serde_json::Value> = res.json().await.unwrap();
@@ -107,13 +108,21 @@ async fn add_member_to_server(
             json!({}),
         )
         .await;
-    assert!(res.status() == 200 || res.status() == 201, "create invite failed: {}", res.status());
+    assert!(
+        res.status() == 200 || res.status() == 201,
+        "create invite failed: {}",
+        res.status()
+    );
     let body: serde_json::Value = res.json().await.unwrap();
     let code = body["code"].as_str().unwrap();
 
     // Join via invite
     let res = app
-        .post(member_token, &format!("/api/v1/invites/{}", code), json!({}))
+        .post(
+            member_token,
+            &format!("/api/v1/invites/{}", code),
+            json!({}),
+        )
         .await;
     assert!(
         res.status() == 200 || res.status() == 201,
@@ -140,7 +149,10 @@ async fn test_send_message() {
         .await;
     assert_eq!(res.status(), 201);
     let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["id"].as_str().is_some(), "response should contain message id");
+    assert!(
+        body["id"].as_str().is_some(),
+        "response should contain message id"
+    );
     assert!(body["channel_id"].is_string());
     assert!(body["author_id"].is_string());
     assert!(body["timestamp"].is_string());
@@ -296,7 +308,11 @@ async fn test_send_message_blocked_dm() {
             json!({ "type": 2 }),
         )
         .await;
-    assert!(res.status() == 204 || res.status() == 200, "block failed: {}", res.status());
+    assert!(
+        res.status() == 204 || res.status() == 200,
+        "block failed: {}",
+        res.status()
+    );
 
     // Now B tries to create a new DM with A — should fail
     let res = app
@@ -342,7 +358,11 @@ async fn test_send_message_timed_out_member() {
             json!({ "communication_disabled_until": future }),
         )
         .await;
-    assert!(res.status() == 200 || res.status() == 204, "timeout set failed: {}", res.status());
+    assert!(
+        res.status() == 200 || res.status() == 204,
+        "timeout set failed: {}",
+        res.status()
+    );
 
     // Timed-out member tries to send a message => 403
     let res = app
@@ -380,14 +400,8 @@ async fn test_send_message_with_mentions() {
     let app = get_test_app().await;
     let (token, _server_id, channel_id) = setup_server_with_channel(app).await;
 
-    let body = send_text_message(
-        app,
-        &token,
-        channel_id,
-        "Hey @everyone, check this out!",
-    )
-    .await;
-    assert_eq!(body["mention_everyone"].as_bool().unwrap(), true);
+    let body = send_text_message(app, &token, channel_id, "Hey @everyone, check this out!").await;
+    assert!(body["mention_everyone"].as_bool().unwrap());
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -423,13 +437,19 @@ async fn test_get_messages_before() {
     let res = app
         .get(
             &token,
-            &format!("/api/v1/channels/{}/messages?before={}", channel_id, msg3_id),
+            &format!(
+                "/api/v1/channels/{}/messages?before={}",
+                channel_id, msg3_id
+            ),
         )
         .await;
     assert_eq!(res.status(), 200);
     let messages: Vec<serde_json::Value> = res.json().await.unwrap();
     // Should contain msg1 and msg2, but not msg3
-    let ids: Vec<String> = messages.iter().map(|m| m["id"].as_str().unwrap().to_string()).collect();
+    let ids: Vec<String> = messages
+        .iter()
+        .map(|m| m["id"].as_str().unwrap().to_string())
+        .collect();
     assert!(!ids.contains(&msg3_id.to_string()));
     let msg1_id = msg1["id"].as_str().unwrap().to_string();
     assert!(ids.contains(&msg1_id));
@@ -453,7 +473,10 @@ async fn test_get_messages_after() {
         .await;
     assert_eq!(res.status(), 200);
     let messages: Vec<serde_json::Value> = res.json().await.unwrap();
-    let ids: Vec<String> = messages.iter().map(|m| m["id"].as_str().unwrap().to_string()).collect();
+    let ids: Vec<String> = messages
+        .iter()
+        .map(|m| m["id"].as_str().unwrap().to_string())
+        .collect();
     // Should contain msg2 and msg3, but not msg1
     assert!(!ids.contains(&msg1_id.to_string()));
     let msg2_id = msg2["id"].as_str().unwrap().to_string();
@@ -519,7 +542,10 @@ async fn test_get_messages_around() {
     assert_eq!(res.status(), 200);
     let messages: Vec<serde_json::Value> = res.json().await.unwrap();
     // The target message itself should appear in results
-    let ids: Vec<String> = messages.iter().map(|m| m["id"].as_str().unwrap().to_string()).collect();
+    let ids: Vec<String> = messages
+        .iter()
+        .map(|m| m["id"].as_str().unwrap().to_string())
+        .collect();
     assert!(ids.contains(&msg2_id.to_string()));
 }
 
@@ -856,7 +882,10 @@ async fn test_deleted_message_not_in_history() {
         .iter()
         .map(|m| m["id"].as_str().unwrap().to_string())
         .collect();
-    assert!(!ids.contains(&msg_id), "deleted message should not appear in history");
+    assert!(
+        !ids.contains(&msg_id),
+        "deleted message should not appear in history"
+    );
 }
 
 #[tokio::test]
@@ -889,7 +918,11 @@ async fn test_bulk_delete() {
         .map(|m| m["id"].as_str().unwrap().parse::<i64>().unwrap())
         .collect();
     for id in &ids {
-        assert!(!remaining_ids.contains(id), "bulk-deleted message {} still present", id);
+        assert!(
+            !remaining_ids.contains(id),
+            "bulk-deleted message {} still present",
+            id
+        );
     }
 }
 
@@ -1004,7 +1037,10 @@ async fn test_get_pins() {
     assert_eq!(res.status(), 200);
     let pins: Vec<serde_json::Value> = res.json().await.unwrap();
     assert!(!pins.is_empty());
-    let pin_ids: Vec<String> = pins.iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
+    let pin_ids: Vec<String> = pins
+        .iter()
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect();
     assert!(pin_ids.contains(&msg_id.to_string()));
 }
 
@@ -1037,7 +1073,10 @@ async fn test_unpin_message() {
         .get(&token, &format!("/api/v1/channels/{}/pins", channel_id))
         .await;
     let pins: Vec<serde_json::Value> = res.json().await.unwrap();
-    let pin_ids: Vec<String> = pins.iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
+    let pin_ids: Vec<String> = pins
+        .iter()
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect();
     assert!(!pin_ids.contains(&msg_id.to_string()));
 }
 
@@ -1160,10 +1199,7 @@ async fn test_pins_in_correct_channel() {
 
     // Channel B pins should be empty
     let res = app
-        .get(
-            &token,
-            &format!("/api/v1/channels/{}/pins", channel_id_b),
-        )
+        .get(&token, &format!("/api/v1/channels/{}/pins", channel_id_b))
         .await;
     assert_eq!(res.status(), 200);
     let pins_b: Vec<serde_json::Value> = res.json().await.unwrap();
@@ -1187,7 +1223,9 @@ async fn test_add_reaction() {
             &token,
             &format!(
                 "/api/v1/channels/{}/messages/{}/reactions/{}/@me",
-                channel_id, msg_id, "%F0%9F%91%8D" // thumbs up URL-encoded
+                channel_id,
+                msg_id,
+                "%F0%9F%91%8D" // thumbs up URL-encoded
             ),
             json!({}),
         )
@@ -1616,8 +1654,8 @@ async fn test_get_unread() {
     let unread: Vec<serde_json::Value> = res.json().await.unwrap();
 
     // Should have at least one read state for the channel we acked
-    let found = unread.iter().any(|u| {
-        u["channel_id"].as_str() == Some(&channel_id.to_string())
-    });
+    let found = unread
+        .iter()
+        .any(|u| u["channel_id"].as_str() == Some(&channel_id.to_string()));
     assert!(found, "unread should contain the acked channel");
 }

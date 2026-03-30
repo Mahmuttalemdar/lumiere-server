@@ -12,9 +12,9 @@ use scylla::frame::value::CqlTimestamp;
 use serde::Serialize;
 use std::sync::Arc;
 
-use crate::AppState;
 use super::messages::check_channel_permission;
 use super::servers::require_member;
+use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -23,13 +23,11 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 pub fn user_unread_router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/@me/unread", get(get_unread))
+    Router::new().route("/@me/unread", get(get_unread))
 }
 
 pub fn server_ack_router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/{server_id}/ack", post(ack_server))
+    Router::new().route("/{server_id}/ack", post(ack_server))
 }
 
 // ─── Typing Indicator ───────────────────────────────────────────
@@ -39,7 +37,8 @@ async fn send_typing(
     auth: AuthUser,
     Path(channel_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let server_id = check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
+    let server_id =
+        check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
 
     // Rate limit: 1 per 10 seconds
     let mut conn = state.redis.clone();
@@ -67,12 +66,20 @@ async fn send_typing(
         "timestamp": chrono::Utc::now().timestamp(),
     });
     // Publish to channel subject (for DM subscriptions)
-    if let Err(e) = state.nats.publish(&format!("channel.{}.typing", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.typing", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
     // Also publish to server subject for gateway subscribers
     if let Some(sid) = server_id {
-        if let Err(e) = state.nats.publish(&format!("server.{}.events", sid), &event).await {
+        if let Err(e) = state
+            .nats
+            .publish(&format!("server.{}.events", sid), &event)
+            .await
+        {
             tracing::warn!(error = %e, "Failed to publish server NATS event");
         }
     }
@@ -91,19 +98,26 @@ async fn ack_message(
 
     let now = CqlTimestamp(chrono::Utc::now().timestamp_millis());
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().upsert_read_state,
-        (auth.id.value() as i64, channel_id, message_id, now),
-    )
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("ScyllaDB error: {}", e)))?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().upsert_read_state,
+            (auth.id.value() as i64, channel_id, message_id, now),
+        )
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("ScyllaDB error: {}", e)))?;
 
     let event = serde_json::json!({
         "type": "MESSAGE_ACK",
         "channel_id": channel_id,
         "message_id": message_id,
     });
-    if let Err(e) = state.nats.publish(&format!("user.{}.ack", auth.id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("user.{}.ack", auth.id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 
@@ -130,10 +144,14 @@ async fn ack_server(
 
     for (channel_id, last_msg) in channels {
         if let Some(last_message_id) = last_msg {
-            let _ = state.db.scylla.execute_unpaged(
-                &state.db.prepared().upsert_read_state,
-                (user_id, channel_id, last_message_id, now),
-            ).await;
+            let _ = state
+                .db
+                .scylla
+                .execute_unpaged(
+                    &state.db.prepared().upsert_read_state,
+                    (user_id, channel_id, last_message_id, now),
+                )
+                .await;
         }
     }
 
@@ -153,12 +171,12 @@ async fn get_unread(
 ) -> Result<impl IntoResponse, AppError> {
     let user_id = auth.id.value() as i64;
 
-    let qr = state.db.scylla.execute_unpaged(
-        &state.db.prepared().get_unread,
-        (user_id,),
-    )
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("ScyllaDB error: {}", e)))?;
+    let qr = state
+        .db
+        .scylla
+        .execute_unpaged(&state.db.prepared().get_unread, (user_id,))
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("ScyllaDB error: {}", e)))?;
 
     let mut unread = Vec::new();
     if let Ok(rows_result) = qr.into_rows_result() {

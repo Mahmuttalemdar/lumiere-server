@@ -7,12 +7,7 @@ const MAX_FILE_SIZE_FREE: usize = 25 * 1024 * 1024;
 const MAX_FILE_SIZE_PREMIUM: usize = 50 * 1024 * 1024;
 
 /// Allowed image content types for avatars.
-const AVATAR_CONTENT_TYPES: &[&str] = &[
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-];
+const AVATAR_CONTENT_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 /// Allowed content types for general attachments.
 /// NOTE: SVG is intentionally excluded due to XSS vulnerability risk (embedded scripts).
@@ -135,7 +130,10 @@ impl FileValidation {
 
 /// Validate that the first bytes of `data` match the claimed content type.
 /// This prevents clients from uploading a file with a spoofed Content-Type header.
-pub fn validate_content_magic_bytes(data: &[u8], claimed_content_type: &str) -> Result<(), MediaError> {
+pub fn validate_content_magic_bytes(
+    data: &[u8],
+    claimed_content_type: &str,
+) -> Result<(), MediaError> {
     let valid = match claimed_content_type {
         // PNG: 89 50 4E 47
         "image/png" => data.len() >= 4 && data[..4] == [0x89, 0x50, 0x4E, 0x47],
@@ -193,7 +191,8 @@ mod tests {
     #[test]
     fn test_validate_attachment_free_tier() {
         let data = vec![0u8; MAX_FILE_SIZE_FREE + 1];
-        let result = FileValidation::validate_attachment(&data, "application/pdf", AccountTier::Free);
+        let result =
+            FileValidation::validate_attachment(&data, "application/pdf", AccountTier::Free);
         assert!(matches!(result, Err(MediaError::FileTooLarge { .. })));
     }
 
@@ -208,8 +207,14 @@ mod tests {
 
     #[test]
     fn test_extension_mapping() {
-        assert_eq!(FileValidation::extension_for_content_type("image/png").unwrap(), "png");
-        assert_eq!(FileValidation::extension_for_content_type("video/mp4").unwrap(), "mp4");
+        assert_eq!(
+            FileValidation::extension_for_content_type("image/png").unwrap(),
+            "png"
+        );
+        assert_eq!(
+            FileValidation::extension_for_content_type("video/mp4").unwrap(),
+            "mp4"
+        );
         assert!(FileValidation::extension_for_content_type("application/octet-stream").is_err());
     }
 }

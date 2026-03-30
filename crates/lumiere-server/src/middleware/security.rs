@@ -1,9 +1,4 @@
-use axum::{
-    extract::Request,
-    http::HeaderValue,
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
 
 /// Middleware that adds security headers to every response.
 pub async fn security_headers_middleware(req: Request, next: Next) -> Response {
@@ -39,10 +34,7 @@ pub async fn security_headers_middleware(req: Request, next: Next) -> Response {
         HeaderValue::from_static("default-src 'none'"),
     );
     // Prevent caching of API responses that may contain sensitive data
-    headers.insert(
-        "cache-control",
-        HeaderValue::from_static("no-store"),
-    );
+    headers.insert("cache-control", HeaderValue::from_static("no-store"));
     // Cross-Origin isolation headers
     headers.insert(
         "cross-origin-opener-policy",

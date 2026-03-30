@@ -32,11 +32,7 @@ where
     ///
     /// The `fetch` closure is only called if no in-flight request exists for
     /// this key. All concurrent callers for the same key share one result.
-    pub async fn get_or_fetch<F, Fut>(
-        &self,
-        key: K,
-        fetch: F,
-    ) -> Result<Arc<V>, DataServiceError>
+    pub async fn get_or_fetch<F, Fut>(&self, key: K, fetch: F) -> Result<Arc<V>, DataServiceError>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<V, anyhow::Error>>,
@@ -129,9 +125,7 @@ mod tests {
     async fn test_single_fetch() {
         let cache = CoalescingCache::<String, String>::new();
         let result = cache
-            .get_or_fetch("key1".to_string(), || async {
-                Ok("value1".to_string())
-            })
+            .get_or_fetch("key1".to_string(), || async { Ok("value1".to_string()) })
             .await
             .unwrap();
         assert_eq!(*result, "value1");

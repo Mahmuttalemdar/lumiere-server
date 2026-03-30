@@ -25,10 +25,7 @@ impl RedisCache {
     }
 
     /// Get a cached value, returning None on cache miss.
-    pub async fn get<V: DeserializeOwned>(
-        &self,
-        key: &str,
-    ) -> Result<Option<V>, DataServiceError> {
+    pub async fn get<V: DeserializeOwned>(&self, key: &str) -> Result<Option<V>, DataServiceError> {
         let full_key = self.prefixed_key(key);
         let mut conn = self.conn.clone();
         let raw: Option<String> = conn.get(&full_key).await?;
@@ -51,7 +48,8 @@ impl RedisCache {
         let full_key = self.prefixed_key(key);
         let json = serde_json::to_string(value)?;
         let mut conn = self.conn.clone();
-        conn.set_ex::<_, _, ()>(&full_key, &json, ttl.as_secs().max(1)).await?;
+        conn.set_ex::<_, _, ()>(&full_key, &json, ttl.as_secs().max(1))
+            .await?;
         Ok(())
     }
 

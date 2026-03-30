@@ -20,10 +20,7 @@ pub struct CacheConfig {
 
 impl CacheConfig {
     pub fn new(ttl: Duration, max_in_flight: usize) -> Self {
-        Self {
-            ttl,
-            max_in_flight,
-        }
+        Self { ttl, max_in_flight }
     }
 }
 
@@ -73,11 +70,7 @@ where
     /// 3. Execute one DB fetch
     /// 4. Store result in Redis
     /// 5. Return to all waiters
-    pub async fn get_or_fetch<F, Fut>(
-        &self,
-        key: K,
-        fetch: F,
-    ) -> Result<Arc<V>, DataServiceError>
+    pub async fn get_or_fetch<F, Fut>(&self, key: K, fetch: F) -> Result<Arc<V>, DataServiceError>
     where
         F: FnOnce() -> Fut + Send,
         Fut: Future<Output = Result<V, anyhow::Error>> + Send,

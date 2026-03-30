@@ -299,10 +299,7 @@ impl VoiceService {
         let mut state = self
             .get_voice_state(server_id, user_id)
             .await?
-            .ok_or(VoiceError::StateNotFound {
-                user_id,
-                server_id,
-            })?;
+            .ok_or(VoiceError::StateNotFound { user_id, server_id })?;
 
         if let Some(v) = update.self_mute {
             state.self_mute = v;
@@ -468,10 +465,7 @@ mod tests {
     fn test_voice_state_redis_key() {
         let server = Snowflake::new(100);
         let user = Snowflake::new(200);
-        assert_eq!(
-            VoiceState::redis_key(server, user),
-            "voice_state:100:200"
-        );
+        assert_eq!(VoiceState::redis_key(server, user), "voice_state:100:200");
     }
 
     #[test]

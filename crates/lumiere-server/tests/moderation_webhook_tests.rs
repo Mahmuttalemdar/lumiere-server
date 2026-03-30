@@ -1,5 +1,5 @@
 mod common;
-use common::{get_test_app, unique_name, unique_email};
+use common::{get_test_app, unique_email, unique_name};
 
 use common::TestApp;
 
@@ -12,9 +12,7 @@ async fn setup_server_with_two_members(app: &TestApp) -> (String, String, i64, i
     let (owner_token, _) = app
         .register_user(&owner_name, &unique_email(&owner_name), "testpass123")
         .await;
-    let server_id = app
-        .create_server(&owner_token, &unique_name("srv"))
-        .await;
+    let server_id = app.create_server(&owner_token, &unique_name("srv")).await;
 
     // Get the default text channel (type == 0)
     let res = app
@@ -83,10 +81,7 @@ async fn test_create_warning() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["reason"].as_str().unwrap(), "Spamming in chat");
     assert!(body["id"].as_str().is_some());
-    assert_eq!(
-        body["user_id"].as_str().unwrap(),
-        member_id.to_string()
-    );
+    assert_eq!(body["user_id"].as_str().unwrap(), member_id.to_string());
 }
 
 #[tokio::test]
@@ -144,11 +139,7 @@ async fn test_create_warning_nonmember() {
     // Register a user who is NOT a member of the server
     let outsider_name = unique_name("outsider");
     let (_, outsider_id) = app
-        .register_user(
-            &outsider_name,
-            &unique_email(&outsider_name),
-            "testpass123",
-        )
+        .register_user(&outsider_name, &unique_email(&outsider_name), "testpass123")
         .await;
 
     let res = app
@@ -274,16 +265,16 @@ async fn test_warning_creates_audit_log() {
     let res = app
         .get(
             &owner_token,
-            &format!(
-                "/api/v1/servers/{}/audit-log?action_type=50",
-                server_id
-            ),
+            &format!("/api/v1/servers/{}/audit-log?action_type=50", server_id),
         )
         .await;
 
     assert_eq!(res.status(), 200);
     let entries: Vec<serde_json::Value> = res.json().await.unwrap();
-    assert!(!entries.is_empty(), "Audit log should contain warning entry");
+    assert!(
+        !entries.is_empty(),
+        "Audit log should contain warning entry"
+    );
     assert_eq!(entries[0]["action_type"].as_i64().unwrap(), 50);
 }
 
@@ -389,10 +380,7 @@ async fn test_audit_log_filter_by_user() {
     assert_eq!(res.status(), 200);
     let entries: Vec<serde_json::Value> = res.json().await.unwrap();
     for entry in &entries {
-        assert_eq!(
-            entry["user_id"].as_str().unwrap(),
-            owner_id.to_string()
-        );
+        assert_eq!(entry["user_id"].as_str().unwrap(), owner_id.to_string());
     }
 }
 
@@ -428,10 +416,7 @@ async fn test_audit_log_filter_by_action() {
     let res = app
         .get(
             &owner_token,
-            &format!(
-                "/api/v1/servers/{}/audit-log?action_type=51",
-                server_id
-            ),
+            &format!("/api/v1/servers/{}/audit-log?action_type=51", server_id),
         )
         .await;
 
@@ -510,10 +495,7 @@ async fn test_audit_log_limit() {
     let res = app
         .get(
             &owner_token,
-            &format!(
-                "/api/v1/servers/{}/audit-log?limit=2",
-                server_id
-            ),
+            &format!("/api/v1/servers/{}/audit-log?limit=2", server_id),
         )
         .await;
 
@@ -702,7 +684,10 @@ async fn test_automod_rule_fields() {
     assert_eq!(body["trigger_type"].as_i64().unwrap(), 3);
     assert!(!body["enabled"].as_bool().unwrap());
     assert!(body["actions"].is_array());
-    assert_eq!(body["trigger_metadata"]["mention_limit"].as_i64().unwrap(), 5);
+    assert_eq!(
+        body["trigger_metadata"]["mention_limit"].as_i64().unwrap(),
+        5
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -895,10 +880,7 @@ async fn test_get_webhook() {
     let webhook_id = hook["id"].as_str().unwrap();
 
     let res = app
-        .get(
-            &owner_token,
-            &format!("/api/v1/webhooks/{}", webhook_id),
-        )
+        .get(&owner_token, &format!("/api/v1/webhooks/{}", webhook_id))
         .await;
 
     assert_eq!(res.status(), 200);
@@ -950,20 +932,14 @@ async fn test_delete_webhook() {
     let webhook_id = hook["id"].as_str().unwrap();
 
     let res = app
-        .delete(
-            &owner_token,
-            &format!("/api/v1/webhooks/{}", webhook_id),
-        )
+        .delete(&owner_token, &format!("/api/v1/webhooks/{}", webhook_id))
         .await;
 
     assert_eq!(res.status(), 204);
 
     // Verify it is gone
     let get_res = app
-        .get(
-            &owner_token,
-            &format!("/api/v1/webhooks/{}", webhook_id),
-        )
+        .get(&owner_token, &format!("/api/v1/webhooks/{}", webhook_id))
         .await;
     assert_eq!(get_res.status(), 404);
 }
@@ -1435,9 +1411,7 @@ async fn test_full_onboarding_flow() {
     // 1. Register user A
     let name_a = unique_name("onboard_a");
     let email_a = unique_email(&name_a);
-    let (token_a, _) = app
-        .register_user(&name_a, &email_a, "testpass123")
-        .await;
+    let (token_a, _) = app.register_user(&name_a, &email_a, "testpass123").await;
 
     // 2. Login user A
     let (login_token, _refresh) = app.login(&email_a, "testpass123").await;
@@ -1449,10 +1423,7 @@ async fn test_full_onboarding_flow() {
 
     // 4. Get channels, find default text channel
     let ch_res = app
-        .get(
-            &token_a,
-            &format!("/api/v1/servers/{}/channels", server_id),
-        )
+        .get(&token_a, &format!("/api/v1/servers/{}/channels", server_id))
         .await;
     let channels: Vec<serde_json::Value> = ch_res.json().await.unwrap();
     let channel_id: i64 = channels
@@ -1501,10 +1472,7 @@ async fn test_full_onboarding_flow() {
 
     // 8. Verify member count increased
     let srv_res = app
-        .get(
-            &token_a,
-            &format!("/api/v1/servers/{}", server_id),
-        )
+        .get(&token_a, &format!("/api/v1/servers/{}", server_id))
         .await;
     let server: serde_json::Value = srv_res.json().await.unwrap();
     assert!(server["member_count"].as_i64().unwrap() >= 2);
@@ -1544,15 +1512,11 @@ async fn test_full_moderation_flow() {
     assert_eq!(warn_res.status(), 201);
 
     // 2. Timeout the member (1 hour in the future)
-    let timeout_until =
-        (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    let timeout_until = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
     let timeout_res = app
         .patch(
             &owner_token,
-            &format!(
-                "/api/v1/servers/{}/members/{}",
-                server_id, member_id
-            ),
+            &format!("/api/v1/servers/{}/members/{}", server_id, member_id),
             serde_json::json!({ "communication_disabled_until": timeout_until }),
         )
         .await;
@@ -1572,10 +1536,7 @@ async fn test_full_moderation_flow() {
     let ban_res = app
         .put(
             &owner_token,
-            &format!(
-                "/api/v1/servers/{}/bans/{}",
-                server_id, member_id
-            ),
+            &format!("/api/v1/servers/{}/bans/{}", server_id, member_id),
             serde_json::json!({ "reason": "Repeated offenses" }),
         )
         .await;
@@ -1628,10 +1589,7 @@ async fn test_full_permission_flow() {
     let assign_res = app
         .patch(
             &owner_token,
-            &format!(
-                "/api/v1/servers/{}/members/{}",
-                server_id, member_id
-            ),
+            &format!("/api/v1/servers/{}/members/{}", server_id, member_id),
             serde_json::json!({ "roles": [role_id] }),
         )
         .await;
@@ -1745,9 +1703,8 @@ async fn test_full_dm_flow() {
     assert_eq!(list_res.status(), 200);
     let dms: Vec<serde_json::Value> = list_res.json().await.unwrap();
     assert!(
-        dms.iter().any(|d| {
-            d["id"].as_str().unwrap().parse::<i64>().unwrap() == dm_channel_id
-        }),
+        dms.iter()
+            .any(|d| { d["id"].as_str().unwrap().parse::<i64>().unwrap() == dm_channel_id }),
         "DM channel should appear in user B's DM list"
     );
 }
@@ -1802,19 +1759,13 @@ async fn test_full_channel_management() {
 
     // 4. Delete category — children should move to root (parent_id = null)
     let del_res = app
-        .delete(
-            &owner_token,
-            &format!("/api/v1/channels/{}", cat_id),
-        )
+        .delete(&owner_token, &format!("/api/v1/channels/{}", cat_id))
         .await;
     assert_eq!(del_res.status(), 204);
 
     // 5. Verify child channel still exists and parent_id is null
     let child_res = app
-        .get(
-            &owner_token,
-            &format!("/api/v1/channels/{}", child_id),
-        )
+        .get(&owner_token, &format!("/api/v1/channels/{}", child_id))
         .await;
     assert_eq!(child_res.status(), 200);
     let updated_child: serde_json::Value = child_res.json().await.unwrap();
@@ -1864,10 +1815,7 @@ async fn test_server_deletion_cascade() {
 
     // Verify server is gone
     let get_res = app
-        .get(
-            &owner_token,
-            &format!("/api/v1/servers/{}", server_id),
-        )
+        .get(&owner_token, &format!("/api/v1/servers/{}", server_id))
         .await;
     assert!(
         get_res.status() == 403 || get_res.status() == 404,
@@ -1876,10 +1824,7 @@ async fn test_server_deletion_cascade() {
 
     // Verify channels are gone
     let ch_get = app
-        .get(
-            &owner_token,
-            &format!("/api/v1/channels/{}", channel_id),
-        )
+        .get(&owner_token, &format!("/api/v1/channels/{}", channel_id))
         .await;
     assert!(
         ch_get.status() == 404 || ch_get.status() == 403,
@@ -1887,10 +1832,7 @@ async fn test_server_deletion_cascade() {
     );
 
     let extra_ch_get = app
-        .get(
-            &owner_token,
-            &format!("/api/v1/channels/{}", extra_ch_id),
-        )
+        .get(&owner_token, &format!("/api/v1/channels/{}", extra_ch_id))
         .await;
     assert!(
         extra_ch_get.status() == 404 || extra_ch_get.status() == 403,
@@ -1905,18 +1847,12 @@ async fn test_account_deletion_flow() {
     // 1. Register user
     let name = unique_name("delme");
     let email = unique_email(&name);
-    let (token, user_id) = app
-        .register_user(&name, &email, "testpass123")
-        .await;
+    let (token, user_id) = app.register_user(&name, &email, "testpass123").await;
 
     // 2. Create a relationship
     let friend_name = unique_name("delfriend");
     let (friend_token, friend_id) = app
-        .register_user(
-            &friend_name,
-            &unique_email(&friend_name),
-            "testpass123",
-        )
+        .register_user(&friend_name, &unique_email(&friend_name), "testpass123")
         .await;
 
     app.post(
@@ -1958,10 +1894,7 @@ async fn test_account_deletion_flow() {
 
     // 6. Public profile is gone
     let profile_res = app
-        .get(
-            &friend_token,
-            &format!("/api/v1/users/{}", user_id),
-        )
+        .get(&friend_token, &format!("/api/v1/users/{}", user_id))
         .await;
     assert_eq!(profile_res.status(), 404);
 }
@@ -1973,11 +1906,7 @@ async fn test_invite_lifecycle() {
     // Setup server
     let owner_name = unique_name("inv_owner");
     let (owner_token, _) = app
-        .register_user(
-            &owner_name,
-            &unique_email(&owner_name),
-            "testpass123",
-        )
+        .register_user(&owner_name, &unique_email(&owner_name), "testpass123")
         .await;
     let server_id = app
         .create_server(&owner_token, &unique_name("inv_srv"))
@@ -2014,11 +1943,7 @@ async fn test_invite_lifecycle() {
     // 2. First user joins
     let user1_name = unique_name("inv_user1");
     let (user1_token, _) = app
-        .register_user(
-            &user1_name,
-            &unique_email(&user1_name),
-            "testpass123",
-        )
+        .register_user(&user1_name, &unique_email(&user1_name), "testpass123")
         .await;
     let join1 = app
         .post(
@@ -2032,11 +1957,7 @@ async fn test_invite_lifecycle() {
     // 3. Second user joins
     let user2_name = unique_name("inv_user2");
     let (user2_token, _) = app
-        .register_user(
-            &user2_name,
-            &unique_email(&user2_name),
-            "testpass123",
-        )
+        .register_user(&user2_name, &unique_email(&user2_name), "testpass123")
         .await;
     let join2 = app
         .post(
@@ -2050,11 +1971,7 @@ async fn test_invite_lifecycle() {
     // 4. Third user fails — max uses reached
     let user3_name = unique_name("inv_user3");
     let (user3_token, _) = app
-        .register_user(
-            &user3_name,
-            &unique_email(&user3_name),
-            "testpass123",
-        )
+        .register_user(&user3_name, &unique_email(&user3_name), "testpass123")
         .await;
     let join3 = app
         .post(
@@ -2067,21 +1984,14 @@ async fn test_invite_lifecycle() {
 
     // 5. Delete the invite
     let del_res = app
-        .delete(
-            &owner_token,
-            &format!("/api/v1/invites/{}", code),
-        )
+        .delete(&owner_token, &format!("/api/v1/invites/{}", code))
         .await;
     assert_eq!(del_res.status(), 204);
 
     // 6. Fourth user cannot use deleted invite
     let user4_name = unique_name("inv_user4");
     let (user4_token, _) = app
-        .register_user(
-            &user4_name,
-            &unique_email(&user4_name),
-            "testpass123",
-        )
+        .register_user(&user4_name, &unique_email(&user4_name), "testpass123")
         .await;
     let join4 = app
         .post(

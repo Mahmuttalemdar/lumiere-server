@@ -9,11 +9,11 @@ use lumiere_auth::middleware::AuthUser;
 use lumiere_models::{error::AppError, snowflake::Snowflake};
 use lumiere_permissions::Permissions;
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
-use crate::AppState;
 use super::servers::require_permissions;
+use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -87,12 +87,13 @@ async fn create_webhook(
     Path(channel_id): Path<i64>,
     Json(body): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let server_id = sqlx::query_scalar::<_, Option<i64>>("SELECT server_id FROM channels WHERE id = $1")
-        .bind(channel_id)
-        .fetch_optional(&state.db.pg)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
-        .ok_or_else(|| AppError::BadRequest("Cannot create webhooks for DMs".into()))?;
+    let server_id =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT server_id FROM channels WHERE id = $1")
+            .bind(channel_id)
+            .fetch_optional(&state.db.pg)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
+            .ok_or_else(|| AppError::BadRequest("Cannot create webhooks for DMs".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_WEBHOOKS).await?;
 
@@ -115,14 +116,17 @@ async fn create_webhook(
     .execute(&state.db.pg)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(WebhookResponse {
-        id: webhook_id,
-        channel_id: Snowflake::from(channel_id),
-        name: body.name,
-        avatar: body.avatar,
-        token: Some(token),
-        webhook_type: 1,
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(WebhookResponse {
+            id: webhook_id,
+            channel_id: Snowflake::from(channel_id),
+            name: body.name,
+            avatar: body.avatar,
+            token: Some(token),
+            webhook_type: 1,
+        }),
+    ))
 }
 
 async fn get_channel_webhooks(
@@ -130,12 +134,13 @@ async fn get_channel_webhooks(
     auth: AuthUser,
     Path(channel_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let server_id = sqlx::query_scalar::<_, Option<i64>>("SELECT server_id FROM channels WHERE id = $1")
-        .bind(channel_id)
-        .fetch_optional(&state.db.pg)
-        .await?
-        .flatten()
-        .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
+    let server_id =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT server_id FROM channels WHERE id = $1")
+            .bind(channel_id)
+            .fetch_optional(&state.db.pg)
+            .await?
+            .flatten()
+            .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_WEBHOOKS).await?;
 
@@ -146,10 +151,17 @@ async fn get_channel_webhooks(
     .fetch_all(&state.db.pg)
     .await?;
 
-    let webhooks: Vec<WebhookResponse> = rows.into_iter().map(|r| WebhookResponse {
-        id: Snowflake::from(r.0), channel_id: Snowflake::from(r.1), name: r.2,
-        avatar: r.3, token: None, webhook_type: r.4,
-    }).collect();
+    let webhooks: Vec<WebhookResponse> = rows
+        .into_iter()
+        .map(|r| WebhookResponse {
+            id: Snowflake::from(r.0),
+            channel_id: Snowflake::from(r.1),
+            name: r.2,
+            avatar: r.3,
+            token: None,
+            webhook_type: r.4,
+        })
+        .collect();
 
     Ok(Json(webhooks))
 }
@@ -161,13 +173,11 @@ async fn get_webhook(
     Path(webhook_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
     // Look up the webhook's server_id and require MANAGE_WEBHOOKS
-    let server_id = sqlx::query_scalar::<_, i64>(
-        "SELECT server_id FROM webhooks WHERE id = $1",
-    )
-    .bind(webhook_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Webhook not found".into()))?;
+    let server_id = sqlx::query_scalar::<_, i64>("SELECT server_id FROM webhooks WHERE id = $1")
+        .bind(webhook_id)
+        .fetch_optional(&state.db.pg)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Webhook not found".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_WEBHOOKS).await?;
 
@@ -180,8 +190,12 @@ async fn get_webhook(
     .ok_or_else(|| AppError::NotFound("Webhook not found".into()))?;
 
     Ok(Json(WebhookResponse {
-        id: Snowflake::from(row.0), channel_id: Snowflake::from(row.1), name: row.2,
-        avatar: row.3, token: None, webhook_type: row.4,
+        id: Snowflake::from(row.0),
+        channel_id: Snowflake::from(row.1),
+        name: row.2,
+        avatar: row.3,
+        token: None,
+        webhook_type: row.4,
     }))
 }
 
@@ -200,27 +214,34 @@ async fn update_webhook(
     Json(body): Json<UpdateWebhookRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     // Look up the webhook's server_id and require MANAGE_WEBHOOKS
-    let server_id = sqlx::query_scalar::<_, i64>(
-        "SELECT server_id FROM webhooks WHERE id = $1",
-    )
-    .bind(webhook_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Webhook not found".into()))?;
+    let server_id = sqlx::query_scalar::<_, i64>("SELECT server_id FROM webhooks WHERE id = $1")
+        .bind(webhook_id)
+        .fetch_optional(&state.db.pg)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Webhook not found".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_WEBHOOKS).await?;
 
     if let Some(ref name) = body.name {
         sqlx::query("UPDATE webhooks SET name = $1 WHERE id = $2")
-            .bind(name).bind(webhook_id).execute(&state.db.pg).await?;
+            .bind(name)
+            .bind(webhook_id)
+            .execute(&state.db.pg)
+            .await?;
     }
     if let Some(ref avatar) = body.avatar {
         sqlx::query("UPDATE webhooks SET avatar = $1 WHERE id = $2")
-            .bind(avatar.as_deref()).bind(webhook_id).execute(&state.db.pg).await?;
+            .bind(avatar.as_deref())
+            .bind(webhook_id)
+            .execute(&state.db.pg)
+            .await?;
     }
     if let Some(channel_id) = body.channel_id {
         sqlx::query("UPDATE webhooks SET channel_id = $1 WHERE id = $2")
-            .bind(channel_id).bind(webhook_id).execute(&state.db.pg).await?;
+            .bind(channel_id)
+            .bind(webhook_id)
+            .execute(&state.db.pg)
+            .await?;
     }
 
     get_webhook(State(state), auth, Path(webhook_id)).await
@@ -233,13 +254,11 @@ async fn delete_webhook(
     Path(webhook_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
     // Look up the webhook's server_id and require MANAGE_WEBHOOKS
-    let server_id = sqlx::query_scalar::<_, i64>(
-        "SELECT server_id FROM webhooks WHERE id = $1",
-    )
-    .bind(webhook_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Webhook not found".into()))?;
+    let server_id = sqlx::query_scalar::<_, i64>("SELECT server_id FROM webhooks WHERE id = $1")
+        .bind(webhook_id)
+        .fetch_optional(&state.db.pg)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Webhook not found".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_WEBHOOKS).await?;
 
@@ -263,7 +282,9 @@ async fn execute_webhook(
         return Err(AppError::BadRequest("Content must not be empty".into()));
     }
     if content.chars().count() > 4000 {
-        return Err(AppError::BadRequest("Content must be 4000 characters or less".into()));
+        return Err(AppError::BadRequest(
+            "Content must be 4000 characters or less".into(),
+        ));
     }
 
     // Fix #21: Hash the incoming token and compare against stored hash
@@ -285,12 +306,21 @@ async fn execute_webhook(
     let message_id = state.snowflake.next_id();
     let b = lumiere_models::bucket::bucket_from_snowflake(message_id);
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().insert_webhook_message,
-        (channel_id, b, message_id.value() as i64, webhook_id, Some(content)),
-    )
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("ScyllaDB error: {}", e)))?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().insert_webhook_message,
+            (
+                channel_id,
+                b,
+                message_id.value() as i64,
+                webhook_id,
+                Some(content),
+            ),
+        )
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("ScyllaDB error: {}", e)))?;
 
     // Fix #23: Include full message payload in NATS event
     let event = serde_json::json!({
@@ -309,7 +339,10 @@ async fn execute_webhook(
             "webhook_id": webhook_id,
         },
     });
-    let _ = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -331,7 +364,11 @@ async fn create_application(
 
     // Create bot user
     let bot_user_id = state.snowflake.next_id();
-    let bot_token = format!("Bot {}.{}", base64_encode(bot_user_id.value()), nanoid::nanoid!(32));
+    let bot_token = format!(
+        "Bot {}.{}",
+        base64_encode(bot_user_id.value()),
+        nanoid::nanoid!(32)
+    );
 
     // Fix #24: Use SHA-256 instead of Argon2 for bot token hashing
     let token_hash = hex::encode(Sha256::digest(bot_token.as_bytes()));
@@ -363,12 +400,15 @@ async fn create_application(
 
     tx.commit().await?;
 
-    Ok((StatusCode::CREATED, Json(serde_json::json!({
-        "id": app_id,
-        "name": body.name,
-        "bot_id": bot_user_id,
-        "bot_token": bot_token,
-    }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": app_id,
+            "name": body.name,
+            "bot_id": bot_user_id,
+            "bot_token": bot_token,
+        })),
+    ))
 }
 
 fn base64_encode(value: u64) -> String {
@@ -387,10 +427,16 @@ async fn get_my_applications(
     .fetch_all(&state.db.pg)
     .await?;
 
-    let apps: Vec<ApplicationResponse> = rows.into_iter().map(|r| ApplicationResponse {
-        id: Snowflake::from(r.0), name: r.1, description: r.2, icon: r.3,
-        bot_id: r.4.map(Snowflake::from),
-    }).collect();
+    let apps: Vec<ApplicationResponse> = rows
+        .into_iter()
+        .map(|r| ApplicationResponse {
+            id: Snowflake::from(r.0),
+            name: r.1,
+            description: r.2,
+            icon: r.3,
+            bot_id: r.4.map(Snowflake::from),
+        })
+        .collect();
 
     Ok(Json(apps))
 }
@@ -411,11 +457,19 @@ async fn update_application(
 ) -> Result<impl IntoResponse, AppError> {
     if let Some(ref name) = body.name {
         sqlx::query("UPDATE applications SET name = $1 WHERE id = $2 AND owner_id = $3")
-            .bind(name).bind(app_id).bind(auth.id).execute(&state.db.pg).await?;
+            .bind(name)
+            .bind(app_id)
+            .bind(auth.id)
+            .execute(&state.db.pg)
+            .await?;
     }
     if let Some(ref desc) = body.description {
         sqlx::query("UPDATE applications SET description = $1 WHERE id = $2 AND owner_id = $3")
-            .bind(desc.as_deref()).bind(app_id).bind(auth.id).execute(&state.db.pg).await?;
+            .bind(desc.as_deref())
+            .bind(app_id)
+            .bind(auth.id)
+            .execute(&state.db.pg)
+            .await?;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -436,7 +490,11 @@ async fn reset_bot_token(
     .flatten()
     .ok_or_else(|| AppError::NotFound("Application not found".into()))?;
 
-    let new_token = format!("Bot {}.{}", base64_encode(bot_id as u64), nanoid::nanoid!(32));
+    let new_token = format!(
+        "Bot {}.{}",
+        base64_encode(bot_id as u64),
+        nanoid::nanoid!(32)
+    );
 
     // Fix #24: Use SHA-256 instead of Argon2 for bot token hashing
     let token_hash = hex::encode(Sha256::digest(new_token.as_bytes()));
@@ -468,10 +526,14 @@ async fn create_command(
 ) -> Result<impl IntoResponse, AppError> {
     // Validate command name length (Discord-style: 1–32 characters)
     if body.name.is_empty() || body.name.len() > 32 {
-        return Err(AppError::BadRequest("Command name must be between 1 and 32 characters".into()));
+        return Err(AppError::BadRequest(
+            "Command name must be between 1 and 32 characters".into(),
+        ));
     }
     if body.description.len() > 100 {
-        return Err(AppError::BadRequest("Command description must be 100 characters or less".into()));
+        return Err(AppError::BadRequest(
+            "Command description must be 100 characters or less".into(),
+        ));
     }
 
     // Verify ownership
@@ -502,11 +564,16 @@ async fn create_command(
     .execute(&state.db.pg)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(CommandResponse {
-        id: command_id, application_id: Snowflake::from(app_id),
-        name: body.name, description: body.description,
-        options: body.options.unwrap_or(serde_json::json!([])),
-    })))
+    Ok((
+        StatusCode::CREATED,
+        Json(CommandResponse {
+            id: command_id,
+            application_id: Snowflake::from(app_id),
+            name: body.name,
+            description: body.description,
+            options: body.options.unwrap_or(serde_json::json!([])),
+        }),
+    ))
 }
 
 async fn get_commands(
@@ -521,10 +588,16 @@ async fn get_commands(
     .fetch_all(&state.db.pg)
     .await?;
 
-    let commands: Vec<CommandResponse> = rows.into_iter().map(|r| CommandResponse {
-        id: Snowflake::from(r.0), application_id: Snowflake::from(r.1),
-        name: r.2, description: r.3, options: r.4,
-    }).collect();
+    let commands: Vec<CommandResponse> = rows
+        .into_iter()
+        .map(|r| CommandResponse {
+            id: Snowflake::from(r.0),
+            application_id: Snowflake::from(r.1),
+            name: r.2,
+            description: r.3,
+            options: r.4,
+        })
+        .collect();
 
     Ok(Json(commands))
 }
@@ -550,16 +623,28 @@ async fn update_command(
     }
 
     if let Some(name) = body.get("name").and_then(|v| v.as_str()) {
-        sqlx::query("UPDATE application_commands SET name = $1 WHERE id = $2 AND application_id = $3")
-            .bind(name).bind(command_id).bind(app_id).execute(&state.db.pg).await?;
+        sqlx::query(
+            "UPDATE application_commands SET name = $1 WHERE id = $2 AND application_id = $3",
+        )
+        .bind(name)
+        .bind(command_id)
+        .bind(app_id)
+        .execute(&state.db.pg)
+        .await?;
     }
     if let Some(desc) = body.get("description").and_then(|v| v.as_str()) {
         sqlx::query("UPDATE application_commands SET description = $1 WHERE id = $2 AND application_id = $3")
             .bind(desc).bind(command_id).bind(app_id).execute(&state.db.pg).await?;
     }
     if let Some(options) = body.get("options") {
-        sqlx::query("UPDATE application_commands SET options = $1 WHERE id = $2 AND application_id = $3")
-            .bind(options).bind(command_id).bind(app_id).execute(&state.db.pg).await?;
+        sqlx::query(
+            "UPDATE application_commands SET options = $1 WHERE id = $2 AND application_id = $3",
+        )
+        .bind(options)
+        .bind(command_id)
+        .bind(app_id)
+        .execute(&state.db.pg)
+        .await?;
     }
 
     Ok(StatusCode::NO_CONTENT)

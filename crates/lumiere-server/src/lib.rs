@@ -86,42 +86,31 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<Arc<AppState>>
             lumiere_push::PgDeviceTokenStore::new(db.pg.clone()),
         ));
 
-        let apns = config
-            .push
-            .apns
-            .as_ref()
-            .and_then(|cfg| {
-                match lumiere_push::ApnsClient::new(
-                    &cfg.key_path,
-                    &cfg.key_id,
-                    &cfg.team_id,
-                    &cfg.bundle_id,
-                    cfg.sandbox,
-                ) {
-                    Ok(client) => Some(client),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "APNs client not available — iOS push disabled");
-                        None
-                    }
+        let apns = config.push.apns.as_ref().and_then(|cfg| {
+            match lumiere_push::ApnsClient::new(
+                &cfg.key_path,
+                &cfg.key_id,
+                &cfg.team_id,
+                &cfg.bundle_id,
+                cfg.sandbox,
+            ) {
+                Ok(client) => Some(client),
+                Err(e) => {
+                    tracing::warn!(error = %e, "APNs client not available — iOS push disabled");
+                    None
                 }
-            });
+            }
+        });
 
-        let fcm = config
-            .push
-            .fcm
-            .as_ref()
-            .and_then(|cfg| {
-                match lumiere_push::FcmClient::new(
-                    &cfg.service_account_key_path,
-                    &cfg.project_id,
-                ) {
-                    Ok(client) => Some(client),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "FCM client not available — Android push disabled");
-                        None
-                    }
+        let fcm = config.push.fcm.as_ref().and_then(|cfg| {
+            match lumiere_push::FcmClient::new(&cfg.service_account_key_path, &cfg.project_id) {
+                Ok(client) => Some(client),
+                Err(e) => {
+                    tracing::warn!(error = %e, "FCM client not available — Android push disabled");
+                    None
                 }
-            });
+            }
+        });
 
         Some(lumiere_push::PushService::new(apns, fcm, token_store))
     };
@@ -172,14 +161,20 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/health", get(health))
-        .route("/gateway", get(lumiere_gateway::handler::ws_upgrade).with_state(gateway_state))
+        .route(
+            "/gateway",
+            get(lumiere_gateway::handler::ws_upgrade).with_state(gateway_state),
+        )
         .nest("/api/v1/auth", routes::auth::router())
         .nest("/api/v1/users", routes::users::router())
         .nest("/api/v1/servers", routes::servers::router())
         .nest("/api/v1/invites", routes::servers::invite_router())
         .nest("/api/v1/channels", routes::servers::channel_invite_router())
         .nest("/api/v1/channels", routes::channels::router())
-        .nest("/api/v1/channels", routes::roles::channel_permissions_router())
+        .nest(
+            "/api/v1/channels",
+            routes::roles::channel_permissions_router(),
+        )
         .nest("/api/v1/channels", routes::messages::router())
         .nest("/api/v1/channels", routes::reactions::router())
         .nest("/api/v1/channels", routes::typing::router())
@@ -190,7 +185,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .nest("/api/v1", routes::moderation::report_router())
         .nest("/api/v1/channels", routes::webhooks::router())
         .nest("/api/v1/webhooks", routes::webhooks::webhook_exec_router())
-        .nest("/api/v1/applications", routes::webhooks::applications_router())
+        .nest(
+            "/api/v1/applications",
+            routes::webhooks::applications_router(),
+        )
         .nest("/api/v1/servers", routes::roles::router())
         // Attachment upload route with 50 MB body limit
         .nest(
@@ -199,7 +197,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024)),
         )
         // Attachment download route (no special body limit needed)
-        .nest("/api/v1/attachments", routes::attachments::download_router())
+        .nest(
+            "/api/v1/attachments",
+            routes::attachments::download_router(),
+        )
         // Default request body size limit: 1 MB
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         // Global rate limiting (token bucket via Redis)

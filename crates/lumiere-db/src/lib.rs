@@ -51,7 +51,6 @@ pub struct ScyllaPrepared {
 /// Prepare all CQL statements against the current ScyllaDB session.
 async fn prepare_statements(session: &Session) -> anyhow::Result<ScyllaPrepared> {
     let p = |cql: &str| {
-        let session = session;
         let cql = cql.to_owned();
         async move {
             session
@@ -221,7 +220,12 @@ impl Database {
         tracing::info!("Running ScyllaDB migrations...");
 
         // Validate keyspace name to prevent CQL injection
-        if !config.scylla.keyspace.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        if !config
+            .scylla
+            .keyspace
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_')
+        {
             anyhow::bail!("Invalid keyspace name: {}", config.scylla.keyspace);
         }
 
@@ -230,9 +234,7 @@ impl Database {
             "CREATE KEYSPACE IF NOT EXISTS {} WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': {}}}",
             config.scylla.keyspace, config.scylla.replication_factor
         );
-        self.scylla
-            .query_unpaged(create_keyspace, &[])
-            .await?;
+        self.scylla.query_unpaged(create_keyspace, &[]).await?;
 
         self.scylla
             .use_keyspace(&config.scylla.keyspace, false)
@@ -241,11 +243,7 @@ impl Database {
         // Read and execute .cql migration files in order
         let mut entries: Vec<_> = std::fs::read_dir("migrations/scylla")?
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .is_some_and(|ext| ext == "cql")
-            })
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "cql"))
             .collect();
         entries.sort_by_key(|e| e.file_name());
 
@@ -286,10 +284,7 @@ impl Database {
     }
 
     pub async fn check_pg_health(&self) -> bool {
-        sqlx::query("SELECT 1")
-            .execute(&self.pg)
-            .await
-            .is_ok()
+        sqlx::query("SELECT 1").execute(&self.pg).await.is_ok()
     }
 
     pub async fn check_scylla_health(&self) -> bool {

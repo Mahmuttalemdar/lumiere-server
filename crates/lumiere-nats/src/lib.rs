@@ -59,9 +59,7 @@ impl NatsService {
             ..Default::default()
         };
 
-        let consumer = stream
-            .get_or_create_consumer(consumer_name, config)
-            .await?;
+        let consumer = stream.get_or_create_consumer(consumer_name, config).await?;
         Ok(consumer)
     }
 

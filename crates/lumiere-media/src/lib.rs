@@ -4,7 +4,7 @@ mod validation;
 
 pub use error::MediaError;
 pub use service::MediaService;
-pub use validation::{AccountTier, FileValidation, validate_content_magic_bytes};
+pub use validation::{validate_content_magic_bytes, AccountTier, FileValidation};
 
 use bytes::Bytes;
 use futures::stream::Stream;
@@ -142,7 +142,10 @@ impl S3Client {
         &self,
         key: &str,
     ) -> Result<
-        (u16, Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>),
+        (
+            u16,
+            Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>,
+        ),
         MediaError,
     > {
         let response = self
@@ -164,7 +167,7 @@ impl S3Client {
 
         // Map the S3 stream items to std::io::Error for compatibility with axum's Body
         let mapped = futures::StreamExt::map(response.bytes, |item| {
-            item.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            item.map_err(|e| std::io::Error::other(e.to_string()))
         });
 
         Ok((response.status_code, Box::pin(mapped)))
@@ -208,7 +211,11 @@ impl S3Client {
     ///
     /// This avoids proxying through the server entirely — the client fetches
     /// directly from MinIO/S3.
-    pub async fn get_download_url(&self, key: &str, expiry_secs: u32) -> Result<String, MediaError> {
+    pub async fn get_download_url(
+        &self,
+        key: &str,
+        expiry_secs: u32,
+    ) -> Result<String, MediaError> {
         self.get_presigned_url(key, expiry_secs).await
     }
 }

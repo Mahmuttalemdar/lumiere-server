@@ -120,7 +120,10 @@ pub fn compute_permissions(
     // Step 4: Apply channel overrides
     if let Some(overrides) = channel_overrides {
         // 4a: Apply @everyone role override
-        if let Some(ov) = overrides.iter().find(|o| o.target_id == server_id && o.target_type == 0) {
+        if let Some(ov) = overrides
+            .iter()
+            .find(|o| o.target_id == server_id && o.target_type == 0)
+        {
             permissions &= !ov.deny;
             permissions |= ov.allow;
         }
@@ -129,7 +132,10 @@ pub fn compute_permissions(
         let mut role_allow = Permissions::empty();
         let mut role_deny = Permissions::empty();
         for role_id in member_role_ids {
-            if let Some(ov) = overrides.iter().find(|o| o.target_id == *role_id && o.target_type == 0) {
+            if let Some(ov) = overrides
+                .iter()
+                .find(|o| o.target_id == *role_id && o.target_type == 0)
+            {
                 role_allow |= ov.allow;
                 role_deny |= ov.deny;
             }
@@ -138,7 +144,10 @@ pub fn compute_permissions(
         permissions |= role_allow;
 
         // 4c: Apply member-specific override (highest priority)
-        if let Some(ov) = overrides.iter().find(|o| o.target_id == member_id && o.target_type == 1) {
+        if let Some(ov) = overrides
+            .iter()
+            .find(|o| o.target_id == member_id && o.target_type == 1)
+        {
             permissions &= !ov.deny;
             permissions |= ov.allow;
         }
@@ -149,10 +158,7 @@ pub fn compute_permissions(
 
 /// Check if an actor can modify a target based on role hierarchy.
 /// Returns true if the actor's highest role position is above the target's.
-pub fn can_modify_member(
-    actor_highest_position: i32,
-    target_highest_position: i32,
-) -> bool {
+pub fn can_modify_member(actor_highest_position: i32, target_highest_position: i32) -> bool {
     actor_highest_position > target_highest_position
 }
 
@@ -160,7 +166,12 @@ pub fn can_modify_member(
 pub fn highest_role_position(member_role_ids: &[u64], all_roles: &[(u64, i32)]) -> i32 {
     member_role_ids
         .iter()
-        .filter_map(|id| all_roles.iter().find(|(rid, _)| rid == id).map(|(_, pos)| *pos))
+        .filter_map(|id| {
+            all_roles
+                .iter()
+                .find(|(rid, _)| rid == id)
+                .map(|(_, pos)| *pos)
+        })
         .max()
         .unwrap_or(0)
 }

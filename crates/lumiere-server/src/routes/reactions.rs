@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::AppState;
 use super::messages::{check_channel_permission, scylla_err};
+use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -62,12 +62,21 @@ async fn add_reaction(
     check_channel_permission(&state, channel_id, auth.id, Permissions::ADD_REACTIONS).await?;
 
     let now = CqlTimestamp(chrono::Utc::now().timestamp_millis());
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().insert_reaction,
-        (channel_id, message_id, emoji.as_str(), auth.id.value() as i64, now),
-    )
-    .await
-    .map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().insert_reaction,
+            (
+                channel_id,
+                message_id,
+                emoji.as_str(),
+                auth.id.value() as i64,
+                now,
+            ),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({
         "type": "MESSAGE_REACTION_ADD",
@@ -76,7 +85,11 @@ async fn add_reaction(
         "user_id": auth.id,
         "emoji": emoji,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 
@@ -93,12 +106,20 @@ async fn remove_own_reaction(
     }
     check_channel_permission(&state, channel_id, auth.id, Permissions::VIEW_CHANNEL).await?;
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().delete_reaction,
-        (channel_id, message_id, emoji.as_str(), auth.id.value() as i64),
-    )
-    .await
-    .map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().delete_reaction,
+            (
+                channel_id,
+                message_id,
+                emoji.as_str(),
+                auth.id.value() as i64,
+            ),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({
         "type": "MESSAGE_REACTION_REMOVE",
@@ -107,7 +128,11 @@ async fn remove_own_reaction(
         "user_id": auth.id,
         "emoji": emoji,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 
@@ -124,12 +149,15 @@ async fn remove_user_reaction(
     }
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().delete_reaction,
-        (channel_id, message_id, emoji.as_str(), user_id),
-    )
-    .await
-    .map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().delete_reaction,
+            (channel_id, message_id, emoji.as_str(), user_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({
         "type": "MESSAGE_REACTION_REMOVE",
@@ -138,7 +166,11 @@ async fn remove_user_reaction(
         "user_id": user_id,
         "emoji": emoji,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 
@@ -166,19 +198,25 @@ async fn get_reactors(
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
 
     let qr = if let Some(after_id) = query.after {
-        state.db.scylla.execute_unpaged(
-            &state.db.prepared().get_reactors_after,
-            (channel_id, message_id, emoji.as_str(), after_id, limit),
-        )
-        .await
-        .map_err(scylla_err)?
+        state
+            .db
+            .scylla
+            .execute_unpaged(
+                &state.db.prepared().get_reactors_after,
+                (channel_id, message_id, emoji.as_str(), after_id, limit),
+            )
+            .await
+            .map_err(scylla_err)?
     } else {
-        state.db.scylla.execute_unpaged(
-            &state.db.prepared().get_reactors,
-            (channel_id, message_id, emoji.as_str(), limit),
-        )
-        .await
-        .map_err(scylla_err)?
+        state
+            .db
+            .scylla
+            .execute_unpaged(
+                &state.db.prepared().get_reactors,
+                (channel_id, message_id, emoji.as_str(), limit),
+            )
+            .await
+            .map_err(scylla_err)?
     };
 
     let mut user_ids = Vec::new();
@@ -229,19 +267,26 @@ async fn remove_all_reactions(
 ) -> Result<impl IntoResponse, AppError> {
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().delete_all_reactions,
-        (channel_id, message_id),
-    )
-    .await
-    .map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().delete_all_reactions,
+            (channel_id, message_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({
         "type": "MESSAGE_REACTION_REMOVE_ALL",
         "channel_id": channel_id,
         "message_id": message_id,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 
@@ -258,12 +303,15 @@ async fn remove_all_emoji_reactions(
     }
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().delete_emoji_reactions,
-        (channel_id, message_id, emoji.as_str()),
-    )
-    .await
-    .map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().delete_emoji_reactions,
+            (channel_id, message_id, emoji.as_str()),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({
         "type": "MESSAGE_REACTION_REMOVE_EMOJI",
@@ -271,7 +319,11 @@ async fn remove_all_emoji_reactions(
         "message_id": message_id,
         "emoji": emoji,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 

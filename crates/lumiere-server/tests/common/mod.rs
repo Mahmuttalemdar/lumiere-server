@@ -6,21 +6,29 @@ use tokio::sync::OnceCell as AsyncOnceCell;
 static APP: AsyncOnceCell<TestApp> = AsyncOnceCell::const_new();
 
 /// Shared test application — initialized once per test run
+#[allow(dead_code)]
 pub struct TestApp {
     pub state: Arc<AppState>,
     pub addr: String,
     pub client: reqwest::Client,
 }
 
+#[allow(dead_code)]
 impl TestApp {
     pub fn url(&self, path: &str) -> String {
         format!("http://{}{}", self.addr, path)
     }
 
     /// Register a new user and return (access_token, user_id)
-    pub async fn register_user(&self, username: &str, email: &str, password: &str) -> (String, i64) {
-        let res = self.client
-            .post(&self.url("/api/v1/auth/register"))
+    pub async fn register_user(
+        &self,
+        username: &str,
+        email: &str,
+        password: &str,
+    ) -> (String, i64) {
+        let res = self
+            .client
+            .post(self.url("/api/v1/auth/register"))
             .json(&serde_json::json!({
                 "username": username,
                 "email": email,
@@ -41,8 +49,9 @@ impl TestApp {
 
     /// Login and return (access_token, refresh_token)
     pub async fn login(&self, email: &str, password: &str) -> (String, String) {
-        let res = self.client
-            .post(&self.url("/api/v1/auth/login"))
+        let res = self
+            .client
+            .post(self.url("/api/v1/auth/login"))
             .json(&serde_json::json!({
                 "email": email,
                 "password": password
@@ -59,8 +68,9 @@ impl TestApp {
 
     /// Create a server and return (server_id)
     pub async fn create_server(&self, token: &str, name: &str) -> i64 {
-        let res = self.client
-            .post(&self.url("/api/v1/servers"))
+        let res = self
+            .client
+            .post(self.url("/api/v1/servers"))
             .bearer_auth(token)
             .json(&serde_json::json!({ "name": name }))
             .send()
@@ -74,7 +84,7 @@ impl TestApp {
     /// Authenticated GET
     pub async fn get(&self, token: &str, path: &str) -> reqwest::Response {
         self.client
-            .get(&self.url(path))
+            .get(self.url(path))
             .bearer_auth(token)
             .send()
             .await
@@ -82,9 +92,14 @@ impl TestApp {
     }
 
     /// Authenticated POST with JSON body
-    pub async fn post(&self, token: &str, path: &str, body: serde_json::Value) -> reqwest::Response {
+    pub async fn post(
+        &self,
+        token: &str,
+        path: &str,
+        body: serde_json::Value,
+    ) -> reqwest::Response {
         self.client
-            .post(&self.url(path))
+            .post(self.url(path))
             .bearer_auth(token)
             .json(&body)
             .send()
@@ -93,9 +108,14 @@ impl TestApp {
     }
 
     /// Authenticated PATCH with JSON body
-    pub async fn patch(&self, token: &str, path: &str, body: serde_json::Value) -> reqwest::Response {
+    pub async fn patch(
+        &self,
+        token: &str,
+        path: &str,
+        body: serde_json::Value,
+    ) -> reqwest::Response {
         self.client
-            .patch(&self.url(path))
+            .patch(self.url(path))
             .bearer_auth(token)
             .json(&body)
             .send()
@@ -106,7 +126,7 @@ impl TestApp {
     /// Authenticated PUT with JSON body
     pub async fn put(&self, token: &str, path: &str, body: serde_json::Value) -> reqwest::Response {
         self.client
-            .put(&self.url(path))
+            .put(self.url(path))
             .bearer_auth(token)
             .json(&body)
             .send()
@@ -117,7 +137,7 @@ impl TestApp {
     /// Authenticated DELETE
     pub async fn delete(&self, token: &str, path: &str) -> reqwest::Response {
         self.client
-            .delete(&self.url(path))
+            .delete(self.url(path))
             .bearer_auth(token)
             .send()
             .await
@@ -125,9 +145,14 @@ impl TestApp {
     }
 
     /// Authenticated DELETE with JSON body
-    pub async fn delete_with_body(&self, token: &str, path: &str, body: serde_json::Value) -> reqwest::Response {
+    pub async fn delete_with_body(
+        &self,
+        token: &str,
+        path: &str,
+        body: serde_json::Value,
+    ) -> reqwest::Response {
         self.client
-            .delete(&self.url(path))
+            .delete(self.url(path))
             .bearer_auth(token)
             .json(&body)
             .send()
@@ -138,7 +163,7 @@ impl TestApp {
     /// Unauthenticated GET
     pub async fn get_unauth(&self, path: &str) -> reqwest::Response {
         self.client
-            .get(&self.url(path))
+            .get(self.url(path))
             .send()
             .await
             .expect("GET request failed")
@@ -147,7 +172,7 @@ impl TestApp {
     /// Unauthenticated POST
     pub async fn post_unauth(&self, path: &str, body: serde_json::Value) -> reqwest::Response {
         self.client
-            .post(&self.url(path))
+            .post(self.url(path))
             .json(&body)
             .send()
             .await
@@ -165,15 +190,20 @@ pub async fn get_test_app() -> &'static TestApp {
 
         // Ensure working directory is workspace root (where config/ lives)
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let workspace_root = std::path::Path::new(manifest_dir).parent().unwrap().parent().unwrap();
-        std::env::set_current_dir(workspace_root).expect("Failed to set working directory to workspace root");
+        let workspace_root = std::path::Path::new(manifest_dir)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        std::env::set_current_dir(workspace_root)
+            .expect("Failed to set working directory to workspace root");
 
         // Load test config
         let config = AppConfig::load().expect("Failed to load test config");
 
         // Bind to random port using std::net (not tokio) so we can read the address
-        let std_listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("Failed to bind test server");
+        let std_listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind test server");
         let addr = std_listener.local_addr().unwrap().to_string();
         std_listener.set_nonblocking(true).unwrap();
 
@@ -188,7 +218,9 @@ pub async fn get_test_app() -> &'static TestApp {
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 let state = rt.block_on(async {
-                    let state = build_app_state(config).await.expect("Failed to build test app state");
+                    let state = build_app_state(config)
+                        .await
+                        .expect("Failed to build test app state");
                     clean_database(&state).await;
                     state
                 });
@@ -209,13 +241,22 @@ pub async fn get_test_app() -> &'static TestApp {
         // Wait for server to be ready
         let client = reqwest::Client::new();
         for _ in 0..50 {
-            if client.get(&format!("http://{}/health", addr)).send().await.is_ok() {
+            if client
+                .get(format!("http://{}/health", addr))
+                .send()
+                .await
+                .is_ok()
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
-        TestApp { state, addr, client }
+        TestApp {
+            state,
+            addr,
+            client,
+        }
     })
     .await
 }
@@ -224,11 +265,30 @@ pub async fn get_test_app() -> &'static TestApp {
 async fn clean_database(state: &AppState) {
     // PostgreSQL — truncate all tables (order matters due to FK constraints)
     let tables = [
-        "member_roles", "server_members", "dm_recipients", "permission_overrides",
-        "invites", "bans", "warnings", "webhooks", "emojis", "application_commands",
-        "applications", "auto_mod_rules", "audit_log", "notification_settings",
-        "device_tokens", "reports", "attachments", "user_notes", "relationships",
-        "user_settings", "roles", "channels", "servers", "users",
+        "member_roles",
+        "server_members",
+        "dm_recipients",
+        "permission_overrides",
+        "invites",
+        "bans",
+        "warnings",
+        "webhooks",
+        "emojis",
+        "application_commands",
+        "applications",
+        "auto_mod_rules",
+        "audit_log",
+        "notification_settings",
+        "device_tokens",
+        "reports",
+        "attachments",
+        "user_notes",
+        "relationships",
+        "user_settings",
+        "roles",
+        "channels",
+        "servers",
+        "users",
     ];
     for table in tables {
         let sql = format!("TRUNCATE TABLE {} CASCADE", table);
@@ -236,9 +296,19 @@ async fn clean_database(state: &AppState) {
     }
 
     // ScyllaDB — truncate tables
-    let scylla_tables = ["messages", "read_states", "pins", "reactions", "encrypted_messages"];
+    let scylla_tables = [
+        "messages",
+        "read_states",
+        "pins",
+        "reactions",
+        "encrypted_messages",
+    ];
     for table in scylla_tables {
-        let _ = state.db.scylla.query_unpaged(format!("TRUNCATE {}", table), &[]).await;
+        let _ = state
+            .db
+            .scylla
+            .query_unpaged(format!("TRUNCATE {}", table), &[])
+            .await;
     }
 
     // Redis — flush test database

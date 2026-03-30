@@ -12,27 +12,44 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use validator::Validate;
 
-use crate::AppState;
 use super::servers::require_permissions;
+use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         // Warnings
-        .route("/{server_id}/members/{user_id}/warnings", post(create_warning))
+        .route(
+            "/{server_id}/members/{user_id}/warnings",
+            post(create_warning),
+        )
         .route("/{server_id}/members/{user_id}/warnings", get(get_warnings))
-        .route("/{server_id}/members/{user_id}/warnings/{warning_id}", delete(delete_warning))
+        .route(
+            "/{server_id}/members/{user_id}/warnings/{warning_id}",
+            delete(delete_warning),
+        )
         // Audit log
         .route("/{server_id}/audit-log", get(get_audit_log))
         // Auto-moderation
-        .route("/{server_id}/auto-moderation/rules", post(create_auto_mod_rule))
-        .route("/{server_id}/auto-moderation/rules", get(get_auto_mod_rules))
-        .route("/{server_id}/auto-moderation/rules/{rule_id}", patch(update_auto_mod_rule))
-        .route("/{server_id}/auto-moderation/rules/{rule_id}", delete(delete_auto_mod_rule))
+        .route(
+            "/{server_id}/auto-moderation/rules",
+            post(create_auto_mod_rule),
+        )
+        .route(
+            "/{server_id}/auto-moderation/rules",
+            get(get_auto_mod_rules),
+        )
+        .route(
+            "/{server_id}/auto-moderation/rules/{rule_id}",
+            patch(update_auto_mod_rule),
+        )
+        .route(
+            "/{server_id}/auto-moderation/rules/{rule_id}",
+            delete(delete_auto_mod_rule),
+        )
 }
 
 pub fn report_router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/report", post(create_report))
+    Router::new().route("/report", post(create_report))
 }
 
 use axum::routing::patch;
@@ -89,7 +106,9 @@ async fn create_warning(
     require_permissions(&state, server_id, auth.id, Permissions::MODERATE_MEMBERS).await?;
 
     if let Err(errors) = body.validate() {
-        return Err(AppError::Validation(crate::routes::validation_errors(errors)));
+        return Err(AppError::Validation(crate::routes::validation_errors(
+            errors,
+        )));
     }
 
     // Prevent self-warning
@@ -155,7 +174,17 @@ async fn get_warnings(
 ) -> Result<impl IntoResponse, AppError> {
     require_permissions(&state, server_id, auth.id, Permissions::MODERATE_MEMBERS).await?;
 
-    let rows = sqlx::query_as::<_, (i64, i64, i64, Option<i64>, String, chrono::DateTime<chrono::Utc>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            i64,
+            i64,
+            Option<i64>,
+            String,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         "SELECT id, server_id, user_id, moderator_id, reason, created_at \
          FROM warnings WHERE server_id = $1 AND user_id = $2 ORDER BY created_at DESC",
     )
@@ -164,14 +193,17 @@ async fn get_warnings(
     .fetch_all(&state.db.pg)
     .await?;
 
-    let warnings: Vec<WarningResponse> = rows.into_iter().map(|r| WarningResponse {
-        id: Snowflake::from(r.0),
-        server_id: Snowflake::from(r.1),
-        user_id: Snowflake::from(r.2),
-        moderator_id: r.3.map(Snowflake::from),
-        reason: r.4,
-        created_at: r.5,
-    }).collect();
+    let warnings: Vec<WarningResponse> = rows
+        .into_iter()
+        .map(|r| WarningResponse {
+            id: Snowflake::from(r.0),
+            server_id: Snowflake::from(r.1),
+            user_id: Snowflake::from(r.2),
+            moderator_id: r.3.map(Snowflake::from),
+            reason: r.4,
+            created_at: r.5,
+        })
+        .collect();
 
     Ok(Json(warnings))
 }
@@ -227,11 +259,12 @@ async fn get_audit_log(
 ) -> Result<impl IntoResponse, AppError> {
     require_permissions(&state, server_id, auth.id, Permissions::VIEW_AUDIT_LOG).await?;
 
-    let limit = query.limit.unwrap_or(50).max(1).min(100);
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
 
     // Build dynamic query
     let mut sql = "SELECT id, user_id, target_id, action_type, changes, reason, created_at \
-                   FROM audit_log WHERE server_id = $1".to_string();
+                   FROM audit_log WHERE server_id = $1"
+        .to_string();
     let mut param_idx = 2;
 
     if query.user_id.is_some() {
@@ -251,24 +284,44 @@ async fn get_audit_log(
     sql.push_str(" ORDER BY id DESC LIMIT ");
     sql.push_str(&limit.to_string());
 
-    let mut q = sqlx::query_as::<_, (i64, Option<i64>, Option<i64>, i16, Option<serde_json::Value>, Option<String>, chrono::DateTime<chrono::Utc>)>(&sql)
-        .bind(server_id);
+    let mut q = sqlx::query_as::<
+        _,
+        (
+            i64,
+            Option<i64>,
+            Option<i64>,
+            i16,
+            Option<serde_json::Value>,
+            Option<String>,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(&sql)
+    .bind(server_id);
 
-    if let Some(uid) = query.user_id { q = q.bind(uid); }
-    if let Some(at) = query.action_type { q = q.bind(at); }
-    if let Some(before) = query.before { q = q.bind(before); }
+    if let Some(uid) = query.user_id {
+        q = q.bind(uid);
+    }
+    if let Some(at) = query.action_type {
+        q = q.bind(at);
+    }
+    if let Some(before) = query.before {
+        q = q.bind(before);
+    }
 
     let rows = q.fetch_all(&state.db.pg).await?;
 
-    let entries: Vec<AuditLogEntry> = rows.into_iter().map(|r| AuditLogEntry {
-        id: Snowflake::from(r.0),
-        user_id: r.1.map(Snowflake::from),
-        target_id: r.2,
-        action_type: r.3,
-        changes: r.4,
-        reason: r.5,
-        created_at: r.6,
-    }).collect();
+    let entries: Vec<AuditLogEntry> = rows
+        .into_iter()
+        .map(|r| AuditLogEntry {
+            id: Snowflake::from(r.0),
+            user_id: r.1.map(Snowflake::from),
+            target_id: r.2,
+            action_type: r.3,
+            changes: r.4,
+            reason: r.5,
+            created_at: r.6,
+        })
+        .collect();
 
     Ok(Json(entries))
 }
@@ -332,7 +385,19 @@ async fn get_auto_mod_rules(
 ) -> Result<impl IntoResponse, AppError> {
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_SERVER).await?;
 
-    let rows = sqlx::query_as::<_, (i64, i64, String, i16, i16, serde_json::Value, serde_json::Value, bool)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            i64,
+            String,
+            i16,
+            i16,
+            serde_json::Value,
+            serde_json::Value,
+            bool,
+        ),
+    >(
         "SELECT id, server_id, name, event_type, trigger_type, trigger_metadata, actions, enabled \
          FROM auto_mod_rules WHERE server_id = $1",
     )
@@ -340,10 +405,19 @@ async fn get_auto_mod_rules(
     .fetch_all(&state.db.pg)
     .await?;
 
-    let rules: Vec<AutoModRule> = rows.into_iter().map(|r| AutoModRule {
-        id: Snowflake::from(r.0), server_id: Snowflake::from(r.1), name: r.2,
-        event_type: r.3, trigger_type: r.4, trigger_metadata: r.5, actions: r.6, enabled: r.7,
-    }).collect();
+    let rules: Vec<AutoModRule> = rows
+        .into_iter()
+        .map(|r| AutoModRule {
+            id: Snowflake::from(r.0),
+            server_id: Snowflake::from(r.1),
+            name: r.2,
+            event_type: r.3,
+            trigger_type: r.4,
+            trigger_metadata: r.5,
+            actions: r.6,
+            enabled: r.7,
+        })
+        .collect();
 
     Ok(Json(rules))
 }
@@ -372,7 +446,9 @@ async fn update_auto_mod_rule(
             if body.$field.is_some() {
                 sets.push(format!("{} = ${}", $col, param_idx));
                 #[allow(unused_assignments)]
-                { param_idx += 1; }
+                {
+                    param_idx += 1;
+                }
             }
         };
     }
@@ -385,12 +461,23 @@ async fn update_auto_mod_rule(
         return Err(AppError::BadRequest("No fields to update".into()));
     }
 
-    let sql = format!("UPDATE auto_mod_rules SET {} WHERE id = $1 AND server_id = $2", sets.join(", "));
+    let sql = format!(
+        "UPDATE auto_mod_rules SET {} WHERE id = $1 AND server_id = $2",
+        sets.join(", ")
+    );
     let mut q = sqlx::query(&sql).bind(rule_id).bind(server_id);
-    if let Some(ref v) = body.name { q = q.bind(v.as_str()); }
-    if let Some(ref v) = body.trigger_metadata { q = q.bind(v); }
-    if let Some(ref v) = body.actions { q = q.bind(v); }
-    if let Some(v) = body.enabled { q = q.bind(v); }
+    if let Some(ref v) = body.name {
+        q = q.bind(v.as_str());
+    }
+    if let Some(ref v) = body.trigger_metadata {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = body.actions {
+        q = q.bind(v);
+    }
+    if let Some(v) = body.enabled {
+        q = q.bind(v);
+    }
     q.execute(&state.db.pg).await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -429,7 +516,9 @@ async fn create_report(
 ) -> Result<impl IntoResponse, AppError> {
     let valid_types = ["message", "user", "server"];
     if !valid_types.contains(&body.target_type.as_str()) {
-        return Err(AppError::BadRequest("Invalid target_type. Must be: message, user, or server".into()));
+        return Err(AppError::BadRequest(
+            "Invalid target_type. Must be: message, user, or server".into(),
+        ));
     }
 
     let report_id = state.snowflake.next_id();

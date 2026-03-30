@@ -46,7 +46,10 @@ impl<'de> Deserialize<'de> for OpCode {
             9 => Ok(OpCode::InvalidSession),
             10 => Ok(OpCode::Hello),
             11 => Ok(OpCode::HeartbeatAck),
-            _ => Err(serde::de::Error::custom(format!("unknown opcode: {}", value))),
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown opcode: {}",
+                value
+            ))),
         }
     }
 }

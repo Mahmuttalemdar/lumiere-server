@@ -96,10 +96,7 @@ impl FcmClient {
     /// Create a new FCM client by loading the service account JSON key file.
     ///
     /// Returns `Err` if the file cannot be read or parsed.
-    pub fn new(
-        service_account_key_path: &str,
-        project_id: &str,
-    ) -> Result<Self, PushError> {
+    pub fn new(service_account_key_path: &str, project_id: &str) -> Result<Self, PushError> {
         let key_data = std::fs::read_to_string(service_account_key_path).map_err(|e| {
             PushError::FcmError(format!(
                 "Failed to read service account key at {}: {}",
@@ -111,9 +108,8 @@ impl FcmClient {
             PushError::FcmError(format!("Failed to parse service account JSON: {}", e))
         })?;
 
-        let signing_key = EncodingKey::from_rsa_pem(sa.private_key.as_bytes()).map_err(|e| {
-            PushError::FcmError(format!("Failed to parse RSA private key: {}", e))
-        })?;
+        let signing_key = EncodingKey::from_rsa_pem(sa.private_key.as_bytes())
+            .map_err(|e| PushError::FcmError(format!("Failed to parse RSA private key: {}", e)))?;
 
         let http = reqwest::Client::builder()
             .pool_max_idle_per_host(20)
@@ -190,9 +186,10 @@ impl FcmClient {
             )));
         }
 
-        let token_response: GoogleTokenResponse = response.json().await.map_err(|e| {
-            PushError::FcmError(format!("Failed to parse token response: {}", e))
-        })?;
+        let token_response: GoogleTokenResponse = response
+            .json()
+            .await
+            .map_err(|e| PushError::FcmError(format!("Failed to parse token response: {}", e)))?;
 
         let expires_at = Instant::now() + TOKEN_TTL - TOKEN_REFRESH_MARGIN;
 
@@ -292,8 +289,7 @@ impl FcmClient {
             404 => {
                 // Token unregistered.
                 let body = response.text().await.unwrap_or_default();
-                let is_unregistered = body.contains("UNREGISTERED")
-                    || body.contains("not found");
+                let is_unregistered = body.contains("UNREGISTERED") || body.contains("not found");
                 if is_unregistered {
                     warn!(
                         token = &registration_token[..8.min(registration_token.len())],
@@ -304,10 +300,7 @@ impl FcmClient {
                         &registration_token[..8.min(registration_token.len())]
                     )))
                 } else {
-                    Err(PushError::FcmError(format!(
-                        "FCM 404 error: {}",
-                        body
-                    )))
+                    Err(PushError::FcmError(format!("FCM 404 error: {}", body)))
                 }
             }
             429 => {

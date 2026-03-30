@@ -39,36 +39,42 @@ impl PgDeviceTokenStore {
         .bind(token)
         .execute(&self.pool)
         .await
-        .map_err(|e| PushError::Internal(anyhow::anyhow!("Failed to register device token: {}", e)))?;
+        .map_err(|e| {
+            PushError::Internal(anyhow::anyhow!("Failed to register device token: {}", e))
+        })?;
 
         debug!(user_id = %user_id.value(), platform = ?platform, "Device token registered");
         Ok(())
     }
 
     /// Unregister a specific device token by its database id.
-    pub async fn unregister_by_id(&self, user_id: Snowflake, device_id: Snowflake) -> PushResult<bool> {
-        let result = sqlx::query(
-            "DELETE FROM device_tokens WHERE id = $1 AND user_id = $2",
-        )
-        .bind(device_id.value() as i64)
-        .bind(user_id.value() as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| PushError::Internal(anyhow::anyhow!("Failed to unregister device: {}", e)))?;
+    pub async fn unregister_by_id(
+        &self,
+        user_id: Snowflake,
+        device_id: Snowflake,
+    ) -> PushResult<bool> {
+        let result = sqlx::query("DELETE FROM device_tokens WHERE id = $1 AND user_id = $2")
+            .bind(device_id.value() as i64)
+            .bind(user_id.value() as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                PushError::Internal(anyhow::anyhow!("Failed to unregister device: {}", e))
+            })?;
 
         Ok(result.rows_affected() > 0)
     }
 
     /// Unregister a specific device token by token string.
     pub async fn unregister(&self, user_id: Snowflake, token: &str) -> PushResult<bool> {
-        let result = sqlx::query(
-            "DELETE FROM device_tokens WHERE user_id = $1 AND token = $2",
-        )
-        .bind(user_id.value() as i64)
-        .bind(token)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| PushError::Internal(anyhow::anyhow!("Failed to unregister device: {}", e)))?;
+        let result = sqlx::query("DELETE FROM device_tokens WHERE user_id = $1 AND token = $2")
+            .bind(user_id.value() as i64)
+            .bind(token)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                PushError::Internal(anyhow::anyhow!("Failed to unregister device: {}", e))
+            })?;
 
         Ok(result.rows_affected() > 0)
     }

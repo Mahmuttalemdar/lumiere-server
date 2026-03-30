@@ -36,8 +36,7 @@ impl Snowflake {
     /// Extract creation time as UTC datetime
     pub fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
         let ms = self.timestamp_ms() + LUMIERE_EPOCH;
-        chrono::DateTime::from_timestamp_millis(ms as i64)
-            .unwrap_or_default()
+        chrono::DateTime::from_timestamp_millis(ms as i64).unwrap_or_default()
     }
 
     /// Extract machine ID

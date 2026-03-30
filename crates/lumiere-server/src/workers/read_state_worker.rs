@@ -27,10 +27,7 @@ pub async fn start(state: Arc<AppState>, cancel: CancellationToken) {
     }
 }
 
-async fn run_consumer(
-    state: &AppState,
-    cancel: &CancellationToken,
-) -> anyhow::Result<()> {
+async fn run_consumer(state: &AppState, cancel: &CancellationToken) -> anyhow::Result<()> {
     let consumer = state
         .nats
         .create_pull_consumer(STREAM_NAME, CONSUMER_NAME, Some(FILTER_SUBJECT))
@@ -95,11 +92,7 @@ async fn process_message(
     // Collect explicitly mentioned user IDs
     let mentioned_users: Vec<i64> = message["mentions"]
         .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_i64())
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect())
         .unwrap_or_default();
 
     // Get all channel members (from the server membership)
@@ -128,8 +121,7 @@ async fn process_message(
     // - Set last_message_id to the latest message in the channel
     // - Increment mention_count if they were mentioned (or @everyone was used)
     for &member_id in &members {
-        let is_mentioned =
-            mention_everyone || mentioned_users.contains(&member_id);
+        let is_mentioned = mention_everyone || mentioned_users.contains(&member_id);
 
         // Upsert read state: update last_message_id and optionally increment
         // mention_count. We use ScyllaDB counters via a separate table, or

@@ -1,14 +1,13 @@
 mod common;
-use common::{get_test_app, unique_name, unique_email};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use common::{get_test_app, unique_email, unique_name};
 use futures::{SinkExt, StreamExt};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use std::time::Duration;
 use tokio::time::timeout;
 
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 type WsSink = futures::stream::SplitSink<WsStream, Message>;
 type WsRecv = futures::stream::SplitStream<WsStream>;
 
@@ -19,7 +18,9 @@ const WS_LONG_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn ws_connect(app: &common::TestApp) -> (WsSink, WsRecv) {
     let url = format!("ws://{}/gateway", app.addr);
-    let (ws_stream, _) = connect_async(&url).await.expect("Failed to connect to gateway");
+    let (ws_stream, _) = connect_async(&url)
+        .await
+        .expect("Failed to connect to gateway");
     ws_stream.split()
 }
 
@@ -39,7 +40,9 @@ async fn read_message(rx: &mut WsRecv) -> serde_json::Value {
 
 async fn send_message_ws(tx: &mut WsSink, msg: serde_json::Value) {
     let text = serde_json::to_string(&msg).unwrap();
-    tx.send(Message::Text(text)).await.expect("Failed to send WS message");
+    tx.send(Message::Text(text))
+        .await
+        .expect("Failed to send WS message");
 }
 
 /// Try to read a message, returning None if the connection closes or times out.
@@ -82,17 +85,21 @@ async fn ws_connect_and_identify(
     assert_eq!(hello["op"], 10, "Expected Hello opcode");
 
     // Send Identify
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 2,
-        "d": {
-            "token": token,
-            "properties": {
-                "os": "test",
-                "browser": "integration-test",
-                "device": "test-runner"
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 2,
+            "d": {
+                "token": token,
+                "properties": {
+                    "os": "test",
+                    "browser": "integration-test",
+                    "device": "test-runner"
+                }
             }
-        }
-    })).await;
+        }),
+    )
+    .await;
 
     // Read Ready
     let ready = read_message(&mut rx).await;
@@ -108,11 +115,8 @@ async fn ws_connect_and_identify(
 /// Drain any pending dispatch events (e.g., PRESENCE_UPDATE on connect).
 async fn drain_pending_events(rx: &mut WsRecv) {
     // Read any queued messages with a short timeout
-    loop {
-        match timeout(Duration::from_millis(500), rx.next()).await {
-            Ok(Some(Ok(Message::Text(_)))) => continue,
-            _ => break,
-        }
+    while let Ok(Some(Ok(Message::Text(_)))) = timeout(Duration::from_millis(500), rx.next()).await
+    {
     }
 }
 
@@ -170,17 +174,21 @@ async fn test_ws_identify_receives_ready() {
     assert_eq!(hello["op"], 10);
 
     // Send Identify (op: 2)
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 2,
-        "d": {
-            "token": token,
-            "properties": {
-                "os": "test",
-                "browser": "test",
-                "device": "test"
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 2,
+            "d": {
+                "token": token,
+                "properties": {
+                    "os": "test",
+                    "browser": "test",
+                    "device": "test"
+                }
             }
-        }
-    })).await;
+        }),
+    )
+    .await;
 
     // Read Ready (op: 0, t: "READY")
     let ready = read_message(&mut rx).await;
@@ -191,10 +199,22 @@ async fn test_ws_identify_receives_ready() {
     let data = &ready["d"];
     assert!(data["user"].is_object(), "READY must contain user object");
     assert!(data["user"]["id"].is_string(), "user must have id");
-    assert!(data["user"]["username"].is_string(), "user must have username");
-    assert!(data["session_id"].is_string(), "READY must contain session_id");
-    assert!(data["servers"].is_array(), "READY must contain servers array");
-    assert!(data["private_channels"].is_array(), "READY must contain private_channels");
+    assert!(
+        data["user"]["username"].is_string(),
+        "user must have username"
+    );
+    assert!(
+        data["session_id"].is_string(),
+        "READY must contain session_id"
+    );
+    assert!(
+        data["servers"].is_array(),
+        "READY must contain servers array"
+    );
+    assert!(
+        data["private_channels"].is_array(),
+        "READY must contain private_channels"
+    );
 }
 
 #[tokio::test]
@@ -206,19 +226,26 @@ async fn test_ws_identify_invalid_token() {
     let _hello = read_message(&mut rx).await;
 
     // Send Identify with bad token
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 2,
-        "d": {
-            "token": "this.is.an.invalid.token",
-            "properties": {}
-        }
-    })).await;
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 2,
+            "d": {
+                "token": "this.is.an.invalid.token",
+                "properties": {}
+            }
+        }),
+    )
+    .await;
 
     // Should receive InvalidSession (op: 9)
     let msg = read_message(&mut rx).await;
     assert_eq!(msg["op"], 9, "Expected InvalidSession opcode (9)");
     // d should be false (not resumable)
-    assert_eq!(msg["d"], false, "InvalidSession should not be resumable for bad token");
+    assert_eq!(
+        msg["d"], false,
+        "InvalidSession should not be resumable for bad token"
+    );
 }
 
 #[tokio::test]
@@ -233,13 +260,17 @@ async fn test_ws_identify_with_refresh_token() {
     let _hello = read_message(&mut rx).await;
 
     // Send Identify with refresh token instead of access token
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 2,
-        "d": {
-            "token": refresh,
-            "properties": {}
-        }
-    })).await;
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 2,
+            "d": {
+                "token": refresh,
+                "properties": {}
+            }
+        }),
+    )
+    .await;
 
     // Should receive InvalidSession — refresh tokens are not valid for Identify
     let msg = read_message(&mut rx).await;
@@ -256,13 +287,17 @@ async fn test_ws_double_identify() {
     let (mut tx, mut rx, _session_id, _) = ws_connect_and_identify(app, &token).await;
 
     // Send Identify again (already authenticated)
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 2,
-        "d": {
-            "token": token,
-            "properties": {}
-        }
-    })).await;
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 2,
+            "d": {
+                "token": token,
+                "properties": {}
+            }
+        }),
+    )
+    .await;
 
     // Connection should close (ALREADY_AUTHENTICATED close code 4005 or stream ends)
     let closed = expect_close(&mut rx, WS_TIMEOUT).await;
@@ -282,10 +317,14 @@ async fn test_ws_heartbeat_acknowledged() {
     drain_pending_events(&mut rx).await;
 
     // Send Heartbeat (op: 1)
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 1,
-        "d": null
-    })).await;
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 1,
+            "d": null
+        }),
+    )
+    .await;
 
     // Should receive HeartbeatAck (op: 11)
     let ack = read_message(&mut rx).await;
@@ -303,13 +342,20 @@ async fn test_ws_heartbeat_before_identify() {
     // Send Heartbeat without identifying first — server should still ACK
     // (Discord's gateway also ACKs heartbeats before identify)
     let mut tx = _tx;
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 1,
-        "d": null
-    })).await;
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 1,
+            "d": null
+        }),
+    )
+    .await;
 
     let msg = read_message(&mut rx).await;
-    assert_eq!(msg["op"], 11, "Should receive HeartbeatAck even before Identify");
+    assert_eq!(
+        msg["op"], 11,
+        "Should receive HeartbeatAck even before Identify"
+    );
 }
 
 #[tokio::test]
@@ -324,7 +370,10 @@ async fn test_ws_heartbeat_timeout() {
     // The server heartbeat timeout is ~62 seconds. We wait for the connection to close.
     // This test verifies the timeout mechanism works. Using a 70-second window.
     let closed = expect_close(&mut rx, Duration::from_secs(70)).await;
-    assert!(closed, "Connection should close after heartbeat timeout (~62s)");
+    assert!(
+        closed,
+        "Connection should close after heartbeat timeout (~62s)"
+    );
 }
 
 #[tokio::test]
@@ -337,7 +386,9 @@ async fn test_ws_close_graceful() {
     let (mut tx, mut rx, _, _) = ws_connect_and_identify(app, &token).await;
 
     // Send a close frame
-    tx.send(Message::Close(None)).await.expect("Failed to send Close");
+    tx.send(Message::Close(None))
+        .await
+        .expect("Failed to send Close");
 
     // Connection should close cleanly
     let closed = expect_close(&mut rx, WS_TIMEOUT).await;
@@ -359,12 +410,17 @@ async fn test_ws_receive_message_create() {
     let server_id = app.create_server(&token, &unique_name("srv")).await;
 
     // Get server channels (there should be a default text channel)
-    let channels_res = app.get(&token, &format!("/api/v1/servers/{}/channels", server_id)).await;
+    let channels_res = app
+        .get(&token, &format!("/api/v1/servers/{}/channels", server_id))
+        .await;
     let channels: Vec<serde_json::Value> = channels_res.json().await.unwrap();
-    let channel_id = channels.iter()
+    let channel_id = channels
+        .iter()
         .find(|c| c["type"].as_i64() == Some(0))
         .expect("No text channel found")["id"]
-        .as_str().unwrap().to_string();
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Connect WS and identify
     let (_tx, mut rx, _, _) = ws_connect_and_identify(app, &token).await;
@@ -373,11 +429,13 @@ async fn test_ws_receive_message_create() {
     drain_pending_events(&mut rx).await;
 
     // Send a message via API
-    let msg_res = app.post(
-        &token,
-        &format!("/api/v1/channels/{}/messages", channel_id),
-        serde_json::json!({ "content": "Hello from integration test!" }),
-    ).await;
+    let msg_res = app
+        .post(
+            &token,
+            &format!("/api/v1/channels/{}/messages", channel_id),
+            serde_json::json!({ "content": "Hello from integration test!" }),
+        )
+        .await;
     assert!(msg_res.status().is_success(), "Message send failed");
 
     // WS should receive MESSAGE_CREATE event
@@ -394,7 +452,9 @@ async fn test_ws_receive_guild_member_add() {
     // Owner creates a server
     let owner_name = unique_name("owner");
     let owner_email = unique_email("owner");
-    let (owner_token, _) = app.register_user(&owner_name, &owner_email, "TestPass123!").await;
+    let (owner_token, _) = app
+        .register_user(&owner_name, &owner_email, "TestPass123!")
+        .await;
     let server_id = app.create_server(&owner_token, &unique_name("srv")).await;
 
     // Connect owner to WS
@@ -402,29 +462,44 @@ async fn test_ws_receive_guild_member_add() {
     drain_pending_events(&mut owner_rx).await;
 
     // Create invite
-    let channels_res = app.get(&owner_token, &format!("/api/v1/servers/{}/channels", server_id)).await;
+    let channels_res = app
+        .get(
+            &owner_token,
+            &format!("/api/v1/servers/{}/channels", server_id),
+        )
+        .await;
     let channels: Vec<serde_json::Value> = channels_res.json().await.unwrap();
     let channel_id = channels[0]["id"].as_str().unwrap();
 
-    let invite_res = app.post(
-        &owner_token,
-        &format!("/api/v1/channels/{}/invites", channel_id),
-        serde_json::json!({ "max_uses": 10 }),
-    ).await;
+    let invite_res = app
+        .post(
+            &owner_token,
+            &format!("/api/v1/channels/{}/invites", channel_id),
+            serde_json::json!({ "max_uses": 10 }),
+        )
+        .await;
     let invite: serde_json::Value = invite_res.json().await.unwrap();
     let invite_code = invite["code"].as_str().unwrap();
 
     // New user joins the server via invite
     let joiner_name = unique_name("joiner");
     let joiner_email = unique_email("joiner");
-    let (joiner_token, _) = app.register_user(&joiner_name, &joiner_email, "TestPass123!").await;
+    let (joiner_token, _) = app
+        .register_user(&joiner_name, &joiner_email, "TestPass123!")
+        .await;
 
-    let join_res = app.post(
-        &joiner_token,
-        &format!("/api/v1/invites/{}", invite_code),
-        serde_json::json!({}),
-    ).await;
-    assert!(join_res.status().is_success(), "Join via invite failed: {}", join_res.status());
+    let join_res = app
+        .post(
+            &joiner_token,
+            &format!("/api/v1/invites/{}", invite_code),
+            serde_json::json!({}),
+        )
+        .await;
+    assert!(
+        join_res.status().is_success(),
+        "Join via invite failed: {}",
+        join_res.status()
+    );
 
     // Owner should receive GUILD_MEMBER_ADD event
     let event = wait_for_event(&mut owner_rx, "GUILD_MEMBER_ADD").await;
@@ -450,14 +525,20 @@ async fn test_ws_receive_relationship_add() {
     drain_pending_events(&mut rx2).await;
 
     // User1 sends friend request to user2
-    let res = app.post(
-        &token1,
-        "/api/v1/users/@me/relationships",
-        serde_json::json!({
-            "user_id": user_id2
-        }),
-    ).await;
-    assert!(res.status().is_success(), "Friend request failed: {}", res.status());
+    let res = app
+        .post(
+            &token1,
+            "/api/v1/users/@me/relationships",
+            serde_json::json!({
+                "user_id": user_id2
+            }),
+        )
+        .await;
+    assert!(
+        res.status().is_success(),
+        "Friend request failed: {}",
+        res.status()
+    );
 
     // User2 should receive RELATIONSHIP_ADD event via WS
     let event = wait_for_event(&mut rx2, "RELATIONSHIP_ADD").await;
@@ -472,7 +553,9 @@ async fn test_ws_receive_presence_update() {
     // Two users in the same server
     let owner_name = unique_name("presown");
     let owner_email = unique_email("presown");
-    let (owner_token, _) = app.register_user(&owner_name, &owner_email, "TestPass123!").await;
+    let (owner_token, _) = app
+        .register_user(&owner_name, &owner_email, "TestPass123!")
+        .await;
     let server_id = app.create_server(&owner_token, &unique_name("srv")).await;
 
     // Connect owner to WS
@@ -480,21 +563,35 @@ async fn test_ws_receive_presence_update() {
     drain_pending_events(&mut owner_rx).await;
 
     // Second user joins the server and connects to WS
-    let channels_res = app.get(&owner_token, &format!("/api/v1/servers/{}/channels", server_id)).await;
+    let channels_res = app
+        .get(
+            &owner_token,
+            &format!("/api/v1/servers/{}/channels", server_id),
+        )
+        .await;
     let channels: Vec<serde_json::Value> = channels_res.json().await.unwrap();
     let channel_id = channels[0]["id"].as_str().unwrap();
-    let invite_res = app.post(
-        &owner_token,
-        &format!("/api/v1/channels/{}/invites", channel_id),
-        serde_json::json!({}),
-    ).await;
+    let invite_res = app
+        .post(
+            &owner_token,
+            &format!("/api/v1/channels/{}/invites", channel_id),
+            serde_json::json!({}),
+        )
+        .await;
     let invite: serde_json::Value = invite_res.json().await.unwrap();
     let invite_code = invite["code"].as_str().unwrap();
 
     let user_name = unique_name("presusr");
     let user_email = unique_email("presusr");
-    let (user_token, _) = app.register_user(&user_name, &user_email, "TestPass123!").await;
-    app.post(&user_token, &format!("/api/v1/invites/{}", invite_code), serde_json::json!({})).await;
+    let (user_token, _) = app
+        .register_user(&user_name, &user_email, "TestPass123!")
+        .await;
+    app.post(
+        &user_token,
+        &format!("/api/v1/invites/{}", invite_code),
+        serde_json::json!({}),
+    )
+    .await;
 
     // When the second user identifies on WS, presence goes online
     let (_user_tx, _user_rx, _, _) = ws_connect_and_identify(app, &user_token).await;
@@ -515,23 +612,30 @@ async fn test_ws_receive_typing_start() {
     let server_id = app.create_server(&token, &unique_name("srv")).await;
 
     // Get text channel
-    let channels_res = app.get(&token, &format!("/api/v1/servers/{}/channels", server_id)).await;
+    let channels_res = app
+        .get(&token, &format!("/api/v1/servers/{}/channels", server_id))
+        .await;
     let channels: Vec<serde_json::Value> = channels_res.json().await.unwrap();
-    let channel_id = channels.iter()
+    let channel_id = channels
+        .iter()
         .find(|c| c["type"].as_i64() == Some(0))
         .expect("No text channel")["id"]
-        .as_str().unwrap().to_string();
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Connect WS
     let (_tx, mut rx, _, _) = ws_connect_and_identify(app, &token).await;
     drain_pending_events(&mut rx).await;
 
     // Send typing indicator via API
-    let typing_res = app.post(
-        &token,
-        &format!("/api/v1/channels/{}/typing", channel_id),
-        serde_json::json!({}),
-    ).await;
+    let typing_res = app
+        .post(
+            &token,
+            &format!("/api/v1/channels/{}/typing", channel_id),
+            serde_json::json!({}),
+        )
+        .await;
     assert!(typing_res.status().is_success(), "Typing request failed");
 
     // Should receive TYPING_START via WS
@@ -550,12 +654,17 @@ async fn test_ws_multiple_connections() {
     let server_id = app.create_server(&token, &unique_name("srv")).await;
 
     // Get text channel
-    let channels_res = app.get(&token, &format!("/api/v1/servers/{}/channels", server_id)).await;
+    let channels_res = app
+        .get(&token, &format!("/api/v1/servers/{}/channels", server_id))
+        .await;
     let channels: Vec<serde_json::Value> = channels_res.json().await.unwrap();
-    let channel_id = channels.iter()
+    let channel_id = channels
+        .iter()
         .find(|c| c["type"].as_i64() == Some(0))
         .expect("No text channel")["id"]
-        .as_str().unwrap().to_string();
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Open two WS connections for the same user
     let (_tx1, mut rx1, session1, _) = ws_connect_and_identify(app, &token).await;
@@ -570,7 +679,8 @@ async fn test_ws_multiple_connections() {
         &token,
         &format!("/api/v1/channels/{}/messages", channel_id),
         serde_json::json!({ "content": "Multi-connection test" }),
-    ).await;
+    )
+    .await;
 
     // Both connections should receive the event
     let event1 = wait_for_event(&mut rx1, "MESSAGE_CREATE").await;
@@ -594,15 +704,21 @@ async fn test_ws_receive_channel_create() {
     drain_pending_events(&mut rx).await;
 
     // Create a new channel via API
-    let res = app.post(
-        &token,
-        &format!("/api/v1/servers/{}/channels", server_id),
-        serde_json::json!({
-            "name": "new-test-channel",
-            "type": 0
-        }),
-    ).await;
-    assert!(res.status().is_success(), "Channel create failed: {}", res.status());
+    let res = app
+        .post(
+            &token,
+            &format!("/api/v1/servers/{}/channels", server_id),
+            serde_json::json!({
+                "name": "new-test-channel",
+                "type": 0
+            }),
+        )
+        .await;
+    assert!(
+        res.status().is_success(),
+        "Channel create failed: {}",
+        res.status()
+    );
 
     // Should receive CHANNEL_CREATE via WS
     let event = wait_for_event(&mut rx, "CHANNEL_CREATE").await;
@@ -624,16 +740,22 @@ async fn test_ws_receive_guild_role_create() {
     drain_pending_events(&mut rx).await;
 
     // Create a role via API
-    let res = app.post(
-        &token,
-        &format!("/api/v1/servers/{}/roles", server_id),
-        serde_json::json!({
-            "name": "TestRole",
-            "color": 0xFF0000,
-            "permissions": "0"
-        }),
-    ).await;
-    assert!(res.status().is_success(), "Role create failed: {}", res.status());
+    let res = app
+        .post(
+            &token,
+            &format!("/api/v1/servers/{}/roles", server_id),
+            serde_json::json!({
+                "name": "TestRole",
+                "color": 0xFF0000,
+                "permissions": "0"
+            }),
+        )
+        .await;
+    assert!(
+        res.status().is_success(),
+        "Role create failed: {}",
+        res.status()
+    );
 
     // Should receive GUILD_ROLE_CREATE via WS
     let event = wait_for_event(&mut rx, "GUILD_ROLE_CREATE").await;
@@ -671,14 +793,18 @@ async fn test_ws_resume_success() {
     assert_eq!(hello["op"], 10);
 
     // Send Resume (op: 6)
-    send_message_ws(&mut tx2, serde_json::json!({
-        "op": 6,
-        "d": {
-            "token": token,
-            "session_id": session_id,
-            "sequence": seq
-        }
-    })).await;
+    send_message_ws(
+        &mut tx2,
+        serde_json::json!({
+            "op": 6,
+            "d": {
+                "token": token,
+                "session_id": session_id,
+                "sequence": seq
+            }
+        }),
+    )
+    .await;
 
     // Should receive RESUMED dispatch event
     let msg = read_message(&mut rx2).await;
@@ -699,18 +825,25 @@ async fn test_ws_resume_invalid_session() {
     let _hello = read_message(&mut rx).await;
 
     // Try to resume with a fake session_id (never existed or expired)
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 6,
-        "d": {
-            "token": token,
-            "session_id": "nonexistent_session_id_12345678",
-            "sequence": 0
-        }
-    })).await;
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 6,
+            "d": {
+                "token": token,
+                "session_id": "nonexistent_session_id_12345678",
+                "sequence": 0
+            }
+        }),
+    )
+    .await;
 
     // Should receive InvalidSession (op: 9)
     let msg = read_message(&mut rx).await;
-    assert_eq!(msg["op"], 9, "Expected InvalidSession opcode (9) for expired session");
+    assert_eq!(
+        msg["op"], 9,
+        "Expected InvalidSession opcode (9) for expired session"
+    );
 }
 
 #[tokio::test]
@@ -736,14 +869,18 @@ async fn test_ws_resume_wrong_token() {
     let (mut tx_b, mut rx_b) = ws_connect(app).await;
     let _hello = read_message(&mut rx_b).await;
 
-    send_message_ws(&mut tx_b, serde_json::json!({
-        "op": 6,
-        "d": {
-            "token": token_b,
-            "session_id": session_id_a,
-            "sequence": seq_a
-        }
-    })).await;
+    send_message_ws(
+        &mut tx_b,
+        serde_json::json!({
+            "op": 6,
+            "d": {
+                "token": token_b,
+                "session_id": session_id_a,
+                "sequence": seq_a
+            }
+        }),
+    )
+    .await;
 
     // Should receive InvalidSession — user mismatch
     let msg = read_message(&mut rx_b).await;
@@ -770,14 +907,18 @@ async fn test_ws_resume_preserves_session_id() {
     let (mut tx2, mut rx2) = ws_connect(app).await;
     let _hello = read_message(&mut rx2).await;
 
-    send_message_ws(&mut tx2, serde_json::json!({
-        "op": 6,
-        "d": {
-            "token": token,
-            "session_id": session_id.clone(),
-            "sequence": seq
-        }
-    })).await;
+    send_message_ws(
+        &mut tx2,
+        serde_json::json!({
+            "op": 6,
+            "d": {
+                "token": token,
+                "session_id": session_id.clone(),
+                "sequence": seq
+            }
+        }),
+    )
+    .await;
 
     let msg = read_message(&mut rx2).await;
     assert_eq!(msg["t"], "RESUMED");
@@ -789,7 +930,10 @@ async fn test_ws_resume_preserves_session_id() {
     drain_pending_events(&mut rx2).await;
     send_message_ws(&mut tx2, serde_json::json!({ "op": 1, "d": null })).await;
     let ack = read_message(&mut rx2).await;
-    assert_eq!(ack["op"], 11, "Resumed session should respond to heartbeats");
+    assert_eq!(
+        ack["op"], 11,
+        "Resumed session should respond to heartbeats"
+    );
 }
 
 #[tokio::test]
@@ -805,15 +949,19 @@ async fn test_ws_presence_update_via_ws() {
     drain_pending_events(&mut rx).await;
 
     // Send PresenceUpdate (op: 3) via WS
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 3,
-        "d": {
-            "status": "dnd",
-            "custom_status": {
-                "text": "Do not disturb"
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 3,
+            "d": {
+                "status": "dnd",
+                "custom_status": {
+                    "text": "Do not disturb"
+                }
             }
-        }
-    })).await;
+        }),
+    )
+    .await;
 
     // The server should broadcast a PRESENCE_UPDATE event back via NATS
     // (since the user is subscribed to their own events).
@@ -839,9 +987,11 @@ async fn test_ws_rate_limiting() {
     // Send 121 commands rapidly (limit is 120 per 60 seconds)
     // Use heartbeat (op:1) as a cheap command
     for _i in 0..121 {
-        let res = tx.send(Message::Text(
-            serde_json::to_string(&serde_json::json!({ "op": 1, "d": null })).unwrap()
-        )).await;
+        let res = tx
+            .send(Message::Text(
+                serde_json::to_string(&serde_json::json!({ "op": 1, "d": null })).unwrap(),
+            ))
+            .await;
         if res.is_err() {
             // Connection may have been closed by rate limiter already
             break;
@@ -852,7 +1002,10 @@ async fn test_ws_rate_limiting() {
     // Note: the 121st command triggers the close. We might have received
     // some HeartbeatAcks before the close happens.
     let closed = expect_close(&mut rx, WS_LONG_TIMEOUT).await;
-    assert!(closed, "Connection should close after exceeding rate limit (120 commands/60s)");
+    assert!(
+        closed,
+        "Connection should close after exceeding rate limit (120 commands/60s)"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -867,7 +1020,9 @@ async fn test_ws_malformed_json() {
 
     // Send invalid JSON
     let mut tx = _tx;
-    tx.send(Message::Text("this is not json{{{".to_string())).await.unwrap();
+    tx.send(Message::Text("this is not json{{{".to_string()))
+        .await
+        .unwrap();
 
     // Should receive InvalidSession and/or connection closes
     let msg = try_read_message(&mut rx).await;
@@ -888,8 +1043,10 @@ async fn test_ws_unknown_opcode() {
     // Send an unknown opcode (e.g., 99)
     let mut tx = _tx;
     tx.send(Message::Text(
-        serde_json::to_string(&serde_json::json!({ "op": 99, "d": null })).unwrap()
-    )).await.unwrap();
+        serde_json::to_string(&serde_json::json!({ "op": 99, "d": null })).unwrap(),
+    ))
+    .await
+    .unwrap();
 
     // Server may send InvalidSession or simply ignore/close
     // Since OpCode deserialization will fail, this is equivalent to malformed JSON
@@ -909,12 +1066,17 @@ async fn test_ws_sequence_numbers_increment() {
     let server_id = app.create_server(&token, &unique_name("srv")).await;
 
     // Get text channel
-    let channels_res = app.get(&token, &format!("/api/v1/servers/{}/channels", server_id)).await;
+    let channels_res = app
+        .get(&token, &format!("/api/v1/servers/{}/channels", server_id))
+        .await;
     let channels: Vec<serde_json::Value> = channels_res.json().await.unwrap();
-    let channel_id = channels.iter()
+    let channel_id = channels
+        .iter()
         .find(|c| c["type"].as_i64() == Some(0))
         .expect("No text channel")["id"]
-        .as_str().unwrap().to_string();
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let (_tx, mut rx, _, _) = ws_connect_and_identify(app, &token).await;
     drain_pending_events(&mut rx).await;
@@ -924,22 +1086,33 @@ async fn test_ws_sequence_numbers_increment() {
         &token,
         &format!("/api/v1/channels/{}/messages", channel_id),
         serde_json::json!({ "content": "Message 1" }),
-    ).await;
+    )
+    .await;
 
     app.post(
         &token,
         &format!("/api/v1/channels/{}/messages", channel_id),
         serde_json::json!({ "content": "Message 2" }),
-    ).await;
+    )
+    .await;
 
     // Read events and verify sequence numbers are increasing
     let event1 = wait_for_event(&mut rx, "MESSAGE_CREATE").await;
-    let seq1 = event1["s"].as_u64().expect("Event must have sequence number");
+    let seq1 = event1["s"]
+        .as_u64()
+        .expect("Event must have sequence number");
 
     let event2 = wait_for_event(&mut rx, "MESSAGE_CREATE").await;
-    let seq2 = event2["s"].as_u64().expect("Event must have sequence number");
+    let seq2 = event2["s"]
+        .as_u64()
+        .expect("Event must have sequence number");
 
-    assert!(seq2 > seq1, "Sequence numbers must be strictly increasing: {} > {}", seq2, seq1);
+    assert!(
+        seq2 > seq1,
+        "Sequence numbers must be strictly increasing: {} > {}",
+        seq2,
+        seq1
+    );
 }
 
 #[tokio::test]
@@ -949,12 +1122,16 @@ async fn test_ws_identify_missing_token() {
     let _hello = read_message(&mut rx).await;
 
     // Send Identify without token field
-    send_message_ws(&mut tx, serde_json::json!({
-        "op": 2,
-        "d": {
-            "properties": {}
-        }
-    })).await;
+    send_message_ws(
+        &mut tx,
+        serde_json::json!({
+            "op": 2,
+            "d": {
+                "properties": {}
+            }
+        }),
+    )
+    .await;
 
     // Should get InvalidSession
     let msg = read_message(&mut rx).await;

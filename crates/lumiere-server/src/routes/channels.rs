@@ -6,17 +6,14 @@ use axum::{
     Json, Router,
 };
 use lumiere_auth::middleware::AuthUser;
-use lumiere_models::{
-    error::AppError,
-    snowflake::Snowflake,
-};
+use lumiere_models::{error::AppError, snowflake::Snowflake};
 use lumiere_permissions::Permissions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use validator::Validate;
 
-use crate::AppState;
 use super::servers::{require_member, require_permissions};
+use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -25,7 +22,6 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/{channel_id}", delete(delete_channel))
         .route("/{channel_id}/followers", post(follow_channel))
 }
-
 
 // ─── Response types ─────────────────────────────────────────────
 
@@ -62,7 +58,26 @@ pub struct PermissionOverrideResponse {
 // ─── Helpers ────────────────────────────────────────────────────
 
 async fn fetch_channel(state: &AppState, channel_id: i64) -> Result<ChannelResponse, AppError> {
-    let row = sqlx::query_as::<_, (i64, Option<i64>, Option<i64>, i16, Option<String>, Option<String>, i32, Option<i32>, Option<i32>, i32, bool, Option<i64>, Option<String>, bool, chrono::DateTime<chrono::Utc>)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            i64,
+            Option<i64>,
+            Option<i64>,
+            i16,
+            Option<String>,
+            Option<String>,
+            i32,
+            Option<i32>,
+            Option<i32>,
+            i32,
+            bool,
+            Option<i64>,
+            Option<String>,
+            bool,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         "SELECT id, server_id, parent_id, type, name, topic, position, bitrate, user_limit, \
                 rate_limit, nsfw, last_message_id, icon, e2ee_enabled, created_at \
          FROM channels WHERE id = $1",
@@ -172,7 +187,9 @@ async fn get_channel(
         .fetch_one(&state.db.pg)
         .await?;
         if !is_recipient {
-            return Err(AppError::Forbidden("Not a recipient of this channel".into()));
+            return Err(AppError::Forbidden(
+                "Not a recipient of this channel".into(),
+            ));
         }
     }
 
@@ -212,7 +229,9 @@ pub async fn create_channel(
     Json(body): Json<CreateChannelRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if let Err(errors) = body.validate() {
-        return Err(AppError::Validation(crate::routes::validation_errors(errors)));
+        return Err(AppError::Validation(crate::routes::validation_errors(
+            errors,
+        )));
     }
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_CHANNELS).await?;
@@ -221,19 +240,22 @@ pub async fn create_channel(
 
     // Validate channel type
     if ![0, 2, 4, 5].contains(&channel_type) {
-        return Err(AppError::BadRequest("Invalid channel type for server".into()));
+        return Err(AppError::BadRequest(
+            "Invalid channel type for server".into(),
+        ));
     }
 
     // Max 500 channels per server
-    let channel_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM channels WHERE server_id = $1",
-    )
-    .bind(server_id)
-    .fetch_one(&state.db.pg)
-    .await?;
+    let channel_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM channels WHERE server_id = $1")
+            .bind(server_id)
+            .fetch_one(&state.db.pg)
+            .await?;
 
     if channel_count >= 500 {
-        return Err(AppError::BadRequest("Server has reached max channel limit (500)".into()));
+        return Err(AppError::BadRequest(
+            "Server has reached max channel limit (500)".into(),
+        ));
     }
 
     // Validate parent_id
@@ -248,19 +270,22 @@ pub async fn create_channel(
         .ok_or_else(|| AppError::BadRequest("Parent channel not found".into()))?;
 
         if parent_type != 4 {
-            return Err(AppError::BadRequest("Parent must be a category channel".into()));
+            return Err(AppError::BadRequest(
+                "Parent must be a category channel".into(),
+            ));
         }
 
         // Max 50 channels per category
-        let category_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM channels WHERE parent_id = $1",
-        )
-        .bind(parent_id)
-        .fetch_one(&state.db.pg)
-        .await?;
+        let category_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM channels WHERE parent_id = $1")
+                .bind(parent_id)
+                .fetch_one(&state.db.pg)
+                .await?;
 
         if category_count >= 50 {
-            return Err(AppError::BadRequest("Category has reached max channel limit (50)".into()));
+            return Err(AppError::BadRequest(
+                "Category has reached max channel limit (50)".into(),
+            ));
         }
     }
 
@@ -275,7 +300,9 @@ pub async fn create_channel(
 
     if let Some(rate_limit) = body.rate_limit {
         if !(0..=21600).contains(&rate_limit) {
-            return Err(AppError::BadRequest("Rate limit must be 0-21600 seconds".into()));
+            return Err(AppError::BadRequest(
+                "Rate limit must be 0-21600 seconds".into(),
+            ));
         }
     }
 
@@ -306,7 +333,9 @@ pub async fn create_channel(
         for ov in overrides {
             // Validate target_type: 0 = role, 1 = member
             if ov.target_type != 0 && ov.target_type != 1 {
-                return Err(AppError::BadRequest("Override target_type must be 0 (role) or 1 (member)".into()));
+                return Err(AppError::BadRequest(
+                    "Override target_type must be 0 (role) or 1 (member)".into(),
+                ));
             }
             // Strip ADMINISTRATOR bit from allow/deny
             let allow = ov.allow & !1;
@@ -331,7 +360,10 @@ pub async fn create_channel(
         "server_id": server_id,
         "channel_id": channel_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let channel = fetch_channel(&state, channel_id.value() as i64).await?;
     Ok((StatusCode::CREATED, Json(channel)))
@@ -365,21 +397,24 @@ async fn update_channel(
     .await?
     .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
-    let server_id = server_id.ok_or_else(|| AppError::BadRequest("Cannot update DM channels this way".into()))?;
+    let server_id = server_id
+        .ok_or_else(|| AppError::BadRequest("Cannot update DM channels this way".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_CHANNELS).await?;
 
     // Validate update fields
     if let Some(ref name) = body.name {
         if name.trim().is_empty() || name.len() > 100 {
-            return Err(AppError::BadRequest("Channel name must be 1-100 characters".into()));
+            return Err(AppError::BadRequest(
+                "Channel name must be 1-100 characters".into(),
+            ));
         }
     }
-    if let Some(ref topic) = body.topic {
-        if let Some(ref t) = topic {
-            if t.len() > 1024 {
-                return Err(AppError::BadRequest("Topic must be 1024 characters or less".into()));
-            }
+    if let Some(Some(ref t)) = body.topic {
+        if t.len() > 1024 {
+            return Err(AppError::BadRequest(
+                "Topic must be 1024 characters or less".into(),
+            ));
         }
     }
     if let Some(bitrate) = body.bitrate {
@@ -402,13 +437,18 @@ async fn update_channel(
             if body.$field.is_some() {
                 sets.push(format!("{} = ${}", $col, param_idx));
                 #[allow(unused_assignments)]
-                { param_idx += 1; }
+                {
+                    param_idx += 1;
+                }
             }
         };
     }
 
     // Handle name normalization
-    let normalized_name = body.name.as_ref().map(|n| normalize_channel_name(n, channel_type));
+    let normalized_name = body
+        .name
+        .as_ref()
+        .map(|n| normalize_channel_name(n, channel_type));
     if normalized_name.is_some() {
         sets.push(format!("name = ${param_idx}"));
         param_idx += 1;
@@ -425,14 +465,30 @@ async fn update_channel(
         let sql = format!("UPDATE channels SET {} WHERE id = $1", sets.join(", "));
         let mut query = sqlx::query(&sql).bind(channel_id);
 
-        if let Some(ref name) = normalized_name { query = query.bind(name.as_str()); }
-        if let Some(ref v) = body.topic { query = query.bind(v.as_deref()); }
-        if let Some(v) = body.position { query = query.bind(v); }
-        if let Some(ref v) = body.parent_id { query = query.bind(*v); }
-        if let Some(v) = body.bitrate { query = query.bind(v); }
-        if let Some(v) = body.user_limit { query = query.bind(v); }
-        if let Some(v) = body.rate_limit { query = query.bind(v); }
-        if let Some(v) = body.nsfw { query = query.bind(v); }
+        if let Some(ref name) = normalized_name {
+            query = query.bind(name.as_str());
+        }
+        if let Some(ref v) = body.topic {
+            query = query.bind(v.as_deref());
+        }
+        if let Some(v) = body.position {
+            query = query.bind(v);
+        }
+        if let Some(ref v) = body.parent_id {
+            query = query.bind(*v);
+        }
+        if let Some(v) = body.bitrate {
+            query = query.bind(v);
+        }
+        if let Some(v) = body.user_limit {
+            query = query.bind(v);
+        }
+        if let Some(v) = body.rate_limit {
+            query = query.bind(v);
+        }
+        if let Some(v) = body.nsfw {
+            query = query.bind(v);
+        }
 
         query.execute(&state.db.pg).await?;
     }
@@ -442,7 +498,9 @@ async fn update_channel(
         // Validate all overrides first
         for ov in overrides {
             if ov.target_type != 0 && ov.target_type != 1 {
-                return Err(AppError::BadRequest("Override target_type must be 0 (role) or 1 (member)".into()));
+                return Err(AppError::BadRequest(
+                    "Override target_type must be 0 (role) or 1 (member)".into(),
+                ));
             }
         }
 
@@ -479,7 +537,10 @@ async fn update_channel(
         "server_id": server_id,
         "channel_id": channel_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     let channel = fetch_channel(&state, channel_id).await?;
     Ok(Json(channel))
@@ -498,7 +559,8 @@ async fn delete_channel(
     .await?
     .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
-    let server_id = server_id.ok_or_else(|| AppError::BadRequest("Cannot delete DM channels this way".into()))?;
+    let server_id = server_id
+        .ok_or_else(|| AppError::BadRequest("Cannot delete DM channels this way".into()))?;
 
     require_permissions(&state, server_id, auth.id, Permissions::MANAGE_CHANNELS).await?;
 
@@ -537,7 +599,10 @@ async fn delete_channel(
         "server_id": server_id,
         "channel_id": channel_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -588,7 +653,10 @@ pub async fn reorder_channels(
         "type": "CHANNEL_UPDATE",
         "server_id": server_id,
     });
-    let _ = state.nats.publish(&format!("server.{}.events", server_id), &event).await;
+    let _ = state
+        .nats
+        .publish(&format!("server.{}.events", server_id), &event)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -622,17 +690,18 @@ async fn follow_channel(
     .ok_or_else(|| AppError::NotFound("Channel not found".into()))?;
 
     if channel_type != 5 {
-        return Err(AppError::BadRequest("Can only follow announcement channels".into()));
+        return Err(AppError::BadRequest(
+            "Can only follow announcement channels".into(),
+        ));
     }
 
     // Check MANAGE_WEBHOOKS in target channel's server
-    let target_server_id = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT server_id FROM channels WHERE id = $1",
-    )
-    .bind(body.webhook_channel_id)
-    .fetch_optional(&state.db.pg)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Target channel not found".into()))?;
+    let target_server_id =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT server_id FROM channels WHERE id = $1")
+            .bind(body.webhook_channel_id)
+            .fetch_optional(&state.db.pg)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Target channel not found".into()))?;
 
     if let Some(target_sid) = target_server_id {
         require_permissions(&state, target_sid, auth.id, Permissions::MANAGE_WEBHOOKS).await?;

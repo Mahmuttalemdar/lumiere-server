@@ -1,8 +1,8 @@
-/// Input sanitization utilities for user-provided strings.
-///
-/// These functions are called in route handlers before processing input —
-/// they are NOT a global middleware layer. Apply them selectively to
-/// message content, usernames, server names, and other user-facing text.
+// Input sanitization utilities for user-provided strings.
+//
+// These functions are called in route handlers before processing input —
+// they are NOT a global middleware layer. Apply them selectively to
+// message content, usernames, server names, and other user-facing text.
 
 /// Strip null bytes and control characters from a string.
 ///
@@ -10,7 +10,7 @@
 /// since those are valid in message content. All other ASCII/Unicode
 /// control characters (including null bytes) are removed.
 /// Also strips Unicode bidi override characters to prevent text reordering attacks.
-
+///
 /// Returns `true` for Unicode bidirectional override / isolate characters
 /// that can be abused to reorder displayed text (CVE-2021-42574 "Trojan Source").
 fn is_bidi_override(c: char) -> bool {
@@ -25,8 +25,7 @@ pub fn sanitize_string(input: &str) -> String {
     input
         .chars()
         .filter(|c| {
-            (!c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
-                && !is_bidi_override(*c)
+            (!c.is_control() || *c == '\n' || *c == '\r' || *c == '\t') && !is_bidi_override(*c)
         })
         .collect()
 }
@@ -79,7 +78,10 @@ mod tests {
 
     #[test]
     fn test_sanitize_string_preserves_newlines() {
-        assert_eq!(sanitize_string("line1\nline2\r\nline3"), "line1\nline2\r\nline3");
+        assert_eq!(
+            sanitize_string("line1\nline2\r\nline3"),
+            "line1\nline2\r\nline3"
+        );
     }
 
     #[test]

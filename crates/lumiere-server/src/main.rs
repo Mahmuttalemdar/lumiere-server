@@ -20,8 +20,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 3. Validate production settings
     if std::env::var("LUMIERE_ENV").unwrap_or_default() == "production" {
-        std::env::var("MACHINE_ID")
-            .expect("MACHINE_ID must be set in production");
+        std::env::var("MACHINE_ID").expect("MACHINE_ID must be set in production");
         if config.auth.jwt_secret == "lumiere_dev_jwt_secret_change_in_production" {
             panic!("JWT secret must be changed in production! Set LUMIERE__AUTH__JWT_SECRET");
         }
@@ -35,16 +34,23 @@ async fn main() -> anyhow::Result<()> {
 
     // Add metrics endpoint (not in lib.rs — production only concern)
     let metrics_handle = prometheus_handle;
-    app = app.route("/metrics", axum::routing::get(move || {
-        let handle = metrics_handle.clone();
-        async move { handle.render() }
-    }));
+    app = app.route(
+        "/metrics",
+        axum::routing::get(move || {
+            let handle = metrics_handle.clone();
+            async move { handle.render() }
+        }),
+    );
 
     // Add production CORS override
     if std::env::var("LUMIERE_ENV").unwrap_or_default() == "production" {
         use tower_http::cors::CorsLayer;
         let cors = CorsLayer::new()
-            .allow_origin("https://app.lumiere.chat".parse::<axum::http::HeaderValue>().unwrap())
+            .allow_origin(
+                "https://app.lumiere.chat"
+                    .parse::<axum::http::HeaderValue>()
+                    .unwrap(),
+            )
             .allow_methods([
                 axum::http::Method::GET,
                 axum::http::Method::POST,

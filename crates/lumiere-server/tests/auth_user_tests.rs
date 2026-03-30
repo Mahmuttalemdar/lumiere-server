@@ -1,5 +1,5 @@
 mod common;
-use common::{get_test_app, unique_name, unique_email};
+use common::{get_test_app, unique_email, unique_name};
 
 // ═══════════════════════════════════════════════════════════════════
 // Auth Tests
@@ -54,7 +54,10 @@ async fn test_register_missing_username() {
 
     // Missing field should be a 400-level error (either 400 or 422 depending on deserialization)
     let status = res.status().as_u16();
-    assert!(status == 400 || status == 422, "Expected 400 or 422, got {status}");
+    assert!(
+        status == 400 || status == 422,
+        "Expected 400 or 422, got {status}"
+    );
 }
 
 #[tokio::test]
@@ -243,7 +246,10 @@ async fn test_login_after_register() {
     let res = app.get(&login_access, "/api/v1/users/@me").await;
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["id"].as_str().unwrap().parse::<i64>().unwrap(), reg_user_id);
+    assert_eq!(
+        body["id"].as_str().unwrap().parse::<i64>().unwrap(),
+        reg_user_id
+    );
 }
 
 #[tokio::test]
@@ -316,7 +322,9 @@ async fn test_logout() {
     let (access, refresh) = app.login(&email, password).await;
 
     // Logout
-    let res = app.post(&access, "/api/v1/auth/logout", serde_json::json!({})).await;
+    let res = app
+        .post(&access, "/api/v1/auth/logout", serde_json::json!({}))
+        .await;
     assert_eq!(res.status(), 204);
 
     // Old refresh token should now be rejected
@@ -848,7 +856,10 @@ async fn test_accept_friend_request() {
     let body: serde_json::Value = res.json().await.unwrap();
     let rels = body.as_array().unwrap();
     let friend = rels.iter().find(|r| r["type"].as_i64().unwrap() == 1);
-    assert!(friend.is_some(), "Expected friend relationship (type=1) on other side");
+    assert!(
+        friend.is_some(),
+        "Expected friend relationship (type=1) on other side"
+    );
 }
 
 #[tokio::test]
@@ -912,7 +923,10 @@ async fn test_remove_friend() {
 
     // Remove friend
     let res = app
-        .delete(&token1, &format!("/api/v1/users/@me/relationships/{user2_id}"))
+        .delete(
+            &token1,
+            &format!("/api/v1/users/@me/relationships/{user2_id}"),
+        )
         .await;
     assert_eq!(res.status(), 204);
 
@@ -921,7 +935,11 @@ async fn test_remove_friend() {
     let body: serde_json::Value = res.json().await.unwrap();
     let rels = body.as_array().unwrap();
     let has_user2 = rels.iter().any(|r| {
-        r["user"]["id"].as_str().map(|s| s.parse::<i64>().unwrap_or(0)).unwrap_or(0) == user2_id
+        r["user"]["id"]
+            .as_str()
+            .map(|s| s.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0)
+            == user2_id
     });
     assert!(!has_user2, "User2 should be removed from relationships");
 
@@ -929,9 +947,16 @@ async fn test_remove_friend() {
     let body: serde_json::Value = res.json().await.unwrap();
     let rels = body.as_array().unwrap();
     let has_user1 = rels.iter().any(|r| {
-        r["user"]["id"].as_str().map(|s| s.parse::<i64>().unwrap_or(0)).unwrap_or(0) == user1_id
+        r["user"]["id"]
+            .as_str()
+            .map(|s| s.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0)
+            == user1_id
     });
-    assert!(!has_user1, "User1 should be removed from relationships on other side");
+    assert!(
+        !has_user1,
+        "User1 should be removed from relationships on other side"
+    );
 }
 
 #[tokio::test]
@@ -955,7 +980,10 @@ async fn test_cancel_outgoing_request() {
 
     // Cancel outgoing request via delete
     let res = app
-        .delete(&token1, &format!("/api/v1/users/@me/relationships/{user2_id}"))
+        .delete(
+            &token1,
+            &format!("/api/v1/users/@me/relationships/{user2_id}"),
+        )
         .await;
     assert_eq!(res.status(), 204);
 
@@ -963,7 +991,10 @@ async fn test_cancel_outgoing_request() {
     let res = app.get(&token2, "/api/v1/users/@me/relationships").await;
     let body: serde_json::Value = res.json().await.unwrap();
     let rels = body.as_array().unwrap();
-    assert!(rels.is_empty(), "Incoming request should be removed after cancel");
+    assert!(
+        rels.is_empty(),
+        "Incoming request should be removed after cancel"
+    );
 }
 
 #[tokio::test]
@@ -1167,7 +1198,10 @@ async fn test_unblock_via_delete() {
 
     // Unblock via DELETE
     let res = app
-        .delete(&token1, &format!("/api/v1/users/@me/relationships/{user2_id}"))
+        .delete(
+            &token1,
+            &format!("/api/v1/users/@me/relationships/{user2_id}"),
+        )
         .await;
     assert_eq!(res.status(), 204);
 
@@ -1176,9 +1210,16 @@ async fn test_unblock_via_delete() {
     let body: serde_json::Value = res.json().await.unwrap();
     let rels = body.as_array().unwrap();
     let has_user2 = rels.iter().any(|r| {
-        r["user"]["id"].as_str().map(|s| s.parse::<i64>().unwrap_or(0)).unwrap_or(0) == user2_id
+        r["user"]["id"]
+            .as_str()
+            .map(|s| s.parse::<i64>().unwrap_or(0))
+            .unwrap_or(0)
+            == user2_id
     });
-    assert!(!has_user2, "Should no longer have any relationship after unblock");
+    assert!(
+        !has_user2,
+        "Should no longer have any relationship after unblock"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1205,7 +1246,10 @@ async fn test_create_dm_channel() {
         .await;
 
     let status = res.status().as_u16();
-    assert!(status == 200 || status == 201, "Expected 200 or 201, got {status}");
+    assert!(
+        status == 200 || status == 201,
+        "Expected 200 or 201, got {status}"
+    );
 
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["id"].is_string());
@@ -1214,7 +1258,11 @@ async fn test_create_dm_channel() {
     let recipients = body["recipients"].as_array().unwrap();
     assert_eq!(recipients.len(), 1);
     assert_eq!(
-        recipients[0]["id"].as_str().unwrap().parse::<i64>().unwrap(),
+        recipients[0]["id"]
+            .as_str()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap(),
         user2_id
     );
 }
@@ -1582,8 +1630,8 @@ async fn test_update_multiple_settings() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["theme"].as_str().unwrap(), "dark");
     assert_eq!(body["status"].as_str().unwrap(), "dnd");
-    assert_eq!(body["dm_notifications"].as_bool().unwrap(), false);
-    assert_eq!(body["animate_emoji"].as_bool().unwrap(), false);
+    assert!(!body["dm_notifications"].as_bool().unwrap());
+    assert!(!body["animate_emoji"].as_bool().unwrap());
 }
 
 #[tokio::test]
@@ -1838,10 +1886,7 @@ async fn test_delete_note_empty_string() {
         .get(&token1, &format!("/api/v1/users/{user2_id}/note"))
         .await;
     let body: serde_json::Value = res.json().await.unwrap();
-    assert!(
-        body["note"].is_null(),
-        "Note should be null after deletion"
-    );
+    assert!(body["note"].is_null(), "Note should be null after deletion");
 }
 
 #[tokio::test]
@@ -1871,7 +1916,8 @@ async fn test_register_email_case_insensitive() {
     let base_email = unique_email("casemail");
 
     // Register with lowercase
-    app.register_user(&name1, &base_email, "securepass123").await;
+    app.register_user(&name1, &base_email, "securepass123")
+        .await;
 
     // Try with uppercase — should conflict
     let upper_email = base_email.to_uppercase();
@@ -1922,7 +1968,10 @@ async fn test_presence_with_custom_status() {
     let presence: serde_json::Value = serde_json::from_str(&val.unwrap()).unwrap();
     assert_eq!(presence["status"].as_str().unwrap(), "online");
     assert!(presence["custom_status"].is_object());
-    assert_eq!(presence["custom_status"]["text"].as_str().unwrap(), "Coding Lumiere");
+    assert_eq!(
+        presence["custom_status"]["text"].as_str().unwrap(),
+        "Coding Lumiere"
+    );
 }
 
 #[tokio::test]

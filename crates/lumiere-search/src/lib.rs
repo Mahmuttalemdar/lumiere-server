@@ -169,12 +169,7 @@ pub struct SearchResult {
 const MESSAGES_INDEX: &str = "messages";
 const DEFAULT_SEARCH_LIMIT: usize = 25;
 
-const FILTERABLE_ATTRIBUTES: &[&str] = &[
-    "channel_id",
-    "server_id",
-    "author_id",
-    "timestamp",
-];
+const FILTERABLE_ATTRIBUTES: &[&str] = &["channel_id", "server_id", "author_id", "timestamp"];
 
 const SORTABLE_ATTRIBUTES: &[&str] = &["timestamp"];
 
@@ -193,8 +188,9 @@ impl SearchService {
     /// Create a new SearchService and configure the messages index.
     #[instrument(skip_all, fields(url = %config.url))]
     pub async fn connect(config: &MeilisearchConfig) -> Result<Self> {
-        let client = Client::new(&config.url, Some(&config.api_key))
-            .map_err(|e| SearchError::IndexConfig(format!("failed to create meilisearch client: {}", e)))?;
+        let client = Client::new(&config.url, Some(&config.api_key)).map_err(|e| {
+            SearchError::IndexConfig(format!("failed to create meilisearch client: {}", e))
+        })?;
 
         let service = Self { client };
         service.configure_index().await?;
@@ -209,13 +205,11 @@ impl SearchService {
         let interval = Some(Duration::from_millis(200));
 
         // Create the index if it doesn't exist (idempotent).
-        let task = self
-            .client
-            .create_index(MESSAGES_INDEX, Some("id"))
-            .await?;
+        let task = self.client.create_index(MESSAGES_INDEX, Some("id")).await?;
 
         // Wait for index creation to complete.
-        task.wait_for_completion(&self.client, timeout, interval).await?;
+        task.wait_for_completion(&self.client, timeout, interval)
+            .await?;
 
         let index = self.client.index(MESSAGES_INDEX);
 
@@ -223,17 +217,20 @@ impl SearchService {
         let task = index
             .set_filterable_attributes(FILTERABLE_ATTRIBUTES)
             .await?;
-        task.wait_for_completion(&self.client, timeout, interval).await?;
+        task.wait_for_completion(&self.client, timeout, interval)
+            .await?;
 
         // Set sortable attributes.
         let task = index.set_sortable_attributes(SORTABLE_ATTRIBUTES).await?;
-        task.wait_for_completion(&self.client, timeout, interval).await?;
+        task.wait_for_completion(&self.client, timeout, interval)
+            .await?;
 
         // Set searchable attributes.
         let task = index
             .set_searchable_attributes(SEARCHABLE_ATTRIBUTES)
             .await?;
-        task.wait_for_completion(&self.client, timeout, interval).await?;
+        task.wait_for_completion(&self.client, timeout, interval)
+            .await?;
 
         info!("messages index configured");
         Ok(())
@@ -285,13 +282,16 @@ impl SearchService {
     }
 
     /// Delete all messages in a channel from the index.
+    #[allow(clippy::needless_borrow)]
     #[instrument(skip(self))]
     pub async fn delete_channel_messages(&self, channel_id: Snowflake) -> Result<()> {
         let filter = format!("channel_id = \"{}\"", channel_id);
         let task = self
             .messages_index()
-            .delete_documents_with(&meilisearch_sdk::documents::DocumentDeletionQuery::new(&self.messages_index())
-                .with_filter(&filter))
+            .delete_documents_with(
+                &meilisearch_sdk::documents::DocumentDeletionQuery::new(&self.messages_index())
+                    .with_filter(&filter),
+            )
             .await?;
 
         let result = task.wait_for_completion(&self.client, None, None).await?;

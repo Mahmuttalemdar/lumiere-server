@@ -419,8 +419,7 @@ mod tests {
 
     #[test]
     fn test_notification_serialization() {
-        let notif = PushNotification::new("Test", "Body")
-            .with_data("key", "value");
+        let notif = PushNotification::new("Test", "Body").with_data("key", "value");
         let json = serde_json::to_string(&notif).unwrap();
         let deserialized: PushNotification = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.title, "Test");
@@ -451,7 +450,9 @@ mod tests {
         let token_str = "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344";
 
         for _ in 0..3 {
-            store.register(make_device(1002, token_str, Platform::Ios)).await;
+            store
+                .register(make_device(1002, token_str, Platform::Ios))
+                .await;
         }
 
         let tokens = store.get_tokens(Snowflake::new(1002)).await;
@@ -463,7 +464,9 @@ mod tests {
         let store = DeviceTokenStore::new();
         let token_str = "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344";
 
-        store.register(make_device(1003, token_str, Platform::Android)).await;
+        store
+            .register(make_device(1003, token_str, Platform::Android))
+            .await;
 
         assert!(store.unregister(Snowflake::new(1003), token_str).await);
         assert!(store.get_tokens(Snowflake::new(1003)).await.is_empty());
@@ -503,7 +506,9 @@ mod tests {
         let shared_token = "shared-invalid-token-xxxxxxxxxxxxxx";
 
         for uid in [5001, 5002, 5003] {
-            store.register(make_device(uid, shared_token, Platform::Android)).await;
+            store
+                .register(make_device(uid, shared_token, Platform::Android))
+                .await;
         }
 
         store.remove_invalid_token(shared_token).await;

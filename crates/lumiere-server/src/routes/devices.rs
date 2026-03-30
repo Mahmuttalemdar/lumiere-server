@@ -54,13 +54,11 @@ async fn register_device(
     let pg_store = PgDeviceTokenStore::new(state.db.pg.clone());
 
     // Enforce a maximum of 10 device tokens per user
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM device_tokens WHERE user_id = $1",
-    )
-    .bind(auth.id)
-    .fetch_one(&state.db.pg)
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("{}", e)))?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_tokens WHERE user_id = $1")
+        .bind(auth.id)
+        .fetch_one(&state.db.pg)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{}", e)))?;
 
     if count >= 10 {
         return Err(AppError::BadRequest(

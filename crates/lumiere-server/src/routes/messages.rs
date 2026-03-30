@@ -6,19 +6,15 @@ use axum::{
     Json, Router,
 };
 use lumiere_auth::middleware::AuthUser;
-use lumiere_models::{
-    bucket,
-    error::AppError,
-    snowflake::Snowflake,
-};
+use lumiere_models::{bucket, error::AppError, snowflake::Snowflake};
 use lumiere_permissions::Permissions;
 use scylla::frame::value::CqlTimestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use crate::AppState;
 use super::servers::require_permissions;
+use crate::AppState;
 
 static USER_MENTION_RE: LazyLock<regex_lite::Regex> =
     LazyLock::new(|| regex_lite::Regex::new(r"<@(\d+)>").unwrap());
@@ -31,7 +27,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/{channel_id}/messages", post(send_message))
         .route("/{channel_id}/messages/{message_id}", get(get_message))
         .route("/{channel_id}/messages/{message_id}", patch(edit_message))
-        .route("/{channel_id}/messages/{message_id}", delete(delete_message))
+        .route(
+            "/{channel_id}/messages/{message_id}",
+            delete(delete_message),
+        )
         .route("/{channel_id}/messages/bulk-delete", post(bulk_delete))
         .route("/{channel_id}/pins", get(get_pins))
         .route("/{channel_id}/pins/{message_id}", put(pin_message))
@@ -40,7 +39,23 @@ pub fn router() -> Router<Arc<AppState>> {
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type MsgRow = (i64, i64, i64, Option<String>, i16, i64, Option<CqlTimestamp>, bool, bool, Option<String>, Option<String>, Option<String>, Option<String>, Option<i64>, bool);
+type MsgRow = (
+    i64,
+    i64,
+    i64,
+    Option<String>,
+    i16,
+    i64,
+    Option<CqlTimestamp>,
+    bool,
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    bool,
+);
 
 #[derive(Debug, Serialize)]
 pub struct MessageResponse {
@@ -70,15 +85,21 @@ fn row_to_response(r: MsgRow) -> MessageResponse {
         author_id: Snowflake::from(r.2),
         content: r.3,
         timestamp: snowflake.created_at(),
-        edited_timestamp: r.6.map(|t| {
-            chrono::DateTime::from_timestamp_millis(t.0).unwrap_or_default()
-        }),
+        edited_timestamp: r
+            .6
+            .map(|t| chrono::DateTime::from_timestamp_millis(t.0).unwrap_or_default()),
         message_type: r.4,
         flags: r.5,
         pinned: r.7,
         mention_everyone: r.8,
-        mentions: r.9.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
-        mention_roles: r.10.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
+        mentions: r
+            .9
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
+        mention_roles: r
+            .10
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
         embeds: r.11.and_then(|s| serde_json::from_str(&s).ok()),
         attachments: r.12.and_then(|s| serde_json::from_str(&s).ok()),
         reference_id: r.13.map(Snowflake::from),
@@ -90,11 +111,10 @@ fn extract_msg_rows(result: scylla::transport::query_result::QueryResult) -> Vec
     let mut out = Vec::new();
     if let Ok(rows_result) = result.into_rows_result() {
         if let Ok(typed_iter) = rows_result.rows::<MsgRow>() {
-            for row in typed_iter {
-                if let Ok(r) = row {
-                    if !r.14 { // skip deleted
-                        out.push(r);
-                    }
+            for r in typed_iter.flatten() {
+                if !r.14 {
+                    // skip deleted
+                    out.push(r);
                 }
             }
         }
@@ -133,7 +153,9 @@ pub async fn check_channel_permission(
             .fetch_one(&state.db.pg)
             .await?;
             if !is_recipient {
-                return Err(AppError::Forbidden("Not a recipient of this channel".into()));
+                return Err(AppError::Forbidden(
+                    "Not a recipient of this channel".into(),
+                ));
             }
             Ok(None)
         }
@@ -161,12 +183,19 @@ async fn query_messages(
         let buckets = bucket::buckets_before(snowflake, min_bucket);
 
         for b in buckets {
-            if results.len() >= limit { break; }
+            if results.len() >= limit {
+                break;
+            }
             let remaining = (limit - results.len()) as i32;
-            let qr = state.db.scylla.execute_unpaged(
-                &ps.get_messages_before,
-                (channel_id, b, before_id, remaining),
-            ).await.map_err(scylla_err)?;
+            let qr = state
+                .db
+                .scylla
+                .execute_unpaged(
+                    &ps.get_messages_before,
+                    (channel_id, b, before_id, remaining),
+                )
+                .await
+                .map_err(scylla_err)?;
             results.extend(extract_msg_rows(qr));
         }
     } else if let Some(after_id) = after {
@@ -175,24 +204,32 @@ async fn query_messages(
         let end_bucket = bucket::current_bucket();
 
         for b in start_bucket..=end_bucket {
-            if results.len() >= limit { break; }
+            if results.len() >= limit {
+                break;
+            }
             let remaining = (limit - results.len()) as i32;
-            let qr = state.db.scylla.execute_unpaged(
-                &ps.get_messages_after,
-                (channel_id, b, after_id, remaining),
-            ).await.map_err(scylla_err)?;
+            let qr = state
+                .db
+                .scylla
+                .execute_unpaged(&ps.get_messages_after, (channel_id, b, after_id, remaining))
+                .await
+                .map_err(scylla_err)?;
             results.extend(extract_msg_rows(qr));
         }
     } else {
         let current = bucket::current_bucket();
         let min_bucket = (current - 20).max(0); // scan at most 20 buckets (~200 days)
         for b in (min_bucket..=current).rev() {
-            if results.len() >= limit { break; }
+            if results.len() >= limit {
+                break;
+            }
             let remaining = (limit - results.len()) as i32;
-            let qr = state.db.scylla.execute_unpaged(
-                &ps.get_messages_latest,
-                (channel_id, b, remaining),
-            ).await.map_err(scylla_err)?;
+            let qr = state
+                .db
+                .scylla
+                .execute_unpaged(&ps.get_messages_latest, (channel_id, b, remaining))
+                .await
+                .map_err(scylla_err)?;
             results.extend(extract_msg_rows(qr));
         }
     }
@@ -235,7 +272,13 @@ async fn get_messages(
     Path(channel_id): Path<i64>,
     Query(query): Query<GetMessagesQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    check_channel_permission(&state, channel_id, auth.id, Permissions::READ_MESSAGE_HISTORY).await?;
+    check_channel_permission(
+        &state,
+        channel_id,
+        auth.id,
+        Permissions::READ_MESSAGE_HISTORY,
+    )
+    .await?;
 
     let limit = query.limit.unwrap_or(50).clamp(1, 100) as usize;
 
@@ -247,10 +290,15 @@ async fn get_messages(
         // Fetch the target message itself
         let target_snowflake = Snowflake::from(around_id);
         let target_bucket = bucket::bucket_from_snowflake(target_snowflake);
-        let target_qr = state.db.scylla.execute_unpaged(
-            &state.db.prepared().get_message_by_id,
-            (channel_id, target_bucket, around_id),
-        ).await.map_err(scylla_err)?;
+        let target_qr = state
+            .db
+            .scylla
+            .execute_unpaged(
+                &state.db.prepared().get_message_by_id,
+                (channel_id, target_bucket, around_id),
+            )
+            .await
+            .map_err(scylla_err)?;
         let target_rows = extract_msg_rows(target_qr);
 
         let mut all = after;
@@ -270,18 +318,31 @@ async fn get_message(
     auth: AuthUser,
     Path((channel_id, message_id)): Path<(i64, i64)>,
 ) -> Result<impl IntoResponse, AppError> {
-    check_channel_permission(&state, channel_id, auth.id, Permissions::READ_MESSAGE_HISTORY).await?;
+    check_channel_permission(
+        &state,
+        channel_id,
+        auth.id,
+        Permissions::READ_MESSAGE_HISTORY,
+    )
+    .await?;
 
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
-    let qr = state.db.scylla.execute_unpaged(
-        &state.db.prepared().get_message_by_id,
-        (channel_id, b, message_id),
-    ).await.map_err(scylla_err)?;
+    let qr = state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().get_message_by_id,
+            (channel_id, b, message_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let rows = extract_msg_rows(qr);
-    let row = rows.into_iter().next()
+    let row = rows
+        .into_iter()
+        .next()
         .ok_or_else(|| AppError::NotFound("Message not found".into()))?;
 
     Ok(Json(row_to_response(row)))
@@ -308,19 +369,24 @@ async fn send_message(
     Path(channel_id): Path<i64>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let server_id = check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
+    let server_id =
+        check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
 
     let has_content = body.content.as_ref().is_some_and(|c| !c.is_empty());
     let has_embeds = body.embeds.as_ref().is_some_and(|e| !e.is_null());
     let has_attachments = body.attachments.as_ref().is_some_and(|a| !a.is_null());
 
     if !has_content && !has_embeds && !has_attachments {
-        return Err(AppError::BadRequest("Message must have content, embeds, or attachments".into()));
+        return Err(AppError::BadRequest(
+            "Message must have content, embeds, or attachments".into(),
+        ));
     }
 
     if let Some(ref content) = body.content {
         if content.chars().count() > 4000 {
-            return Err(AppError::BadRequest("Content must be 4000 characters or less".into()));
+            return Err(AppError::BadRequest(
+                "Content must be 4000 characters or less".into(),
+            ));
         }
     }
 
@@ -334,9 +400,15 @@ async fn send_message(
     if rate_limit > 0 {
         let mut conn = state.redis.clone();
         let key = format!("slowmode:{}:{}", channel_id, auth.id);
-        let exists: bool = redis::cmd("EXISTS").arg(&key).query_async(&mut conn).await.unwrap_or(false);
+        let exists: bool = redis::cmd("EXISTS")
+            .arg(&key)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(false);
         if exists {
-            return Err(AppError::RateLimited { retry_after: rate_limit as u64 });
+            return Err(AppError::RateLimited {
+                retry_after: rate_limit as u64,
+            });
         }
     }
 
@@ -353,7 +425,9 @@ async fn send_message(
 
         if let Some(until) = timed_out {
             if until > chrono::Utc::now() {
-                return Err(AppError::Forbidden("You are timed out in this server".into()));
+                return Err(AppError::Forbidden(
+                    "You are timed out in this server".into(),
+                ));
             }
         }
     }
@@ -362,11 +436,16 @@ async fn send_message(
     let b = bucket::bucket_from_snowflake(message_id);
 
     let (mention_users, mention_roles_parsed, mention_everyone_detected) = body
-        .content.as_ref().map(|c| parse_mentions(c)).unwrap_or_default();
+        .content
+        .as_ref()
+        .map(|c| parse_mentions(c))
+        .unwrap_or_default();
 
     let mention_everyone = if mention_everyone_detected {
         if let Some(sid) = server_id {
-            require_permissions(&state, sid, auth.id, Permissions::MENTION_EVERYONE).await.is_ok()
+            require_permissions(&state, sid, auth.id, Permissions::MENTION_EVERYONE)
+                .await
+                .is_ok()
         } else {
             true // DMs allow @everyone
         }
@@ -374,7 +453,11 @@ async fn send_message(
         false
     };
 
-    let message_type: i16 = if body.message_reference.is_some() { 19 } else { 0 };
+    let message_type: i16 = if body.message_reference.is_some() {
+        19
+    } else {
+        0
+    };
     let reference_id = body.message_reference.as_ref().map(|r| r.message_id);
 
     let mentions_json = serde_json::to_string(&mention_users).unwrap_or_default();
@@ -382,26 +465,47 @@ async fn send_message(
     let embeds_json = body.embeds.as_ref().map(|e| e.to_string());
     let attachments_json = body.attachments.as_ref().map(|a| a.to_string());
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().insert_message,
-        (
-            channel_id, b, message_id.value() as i64, auth.id.value() as i64,
-            body.content.as_deref(), message_type, mention_everyone,
-            Some(mentions_json.as_str()), Some(mention_roles_json.as_str()),
-            embeds_json.as_deref(), attachments_json.as_deref(), reference_id,
-        ),
-    ).await.map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().insert_message,
+            (
+                channel_id,
+                b,
+                message_id.value() as i64,
+                auth.id.value() as i64,
+                body.content.as_deref(),
+                message_type,
+                mention_everyone,
+                Some(mentions_json.as_str()),
+                Some(mention_roles_json.as_str()),
+                embeds_json.as_deref(),
+                attachments_json.as_deref(),
+                reference_id,
+            ),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     // Update last_message_id
     sqlx::query("UPDATE channels SET last_message_id = $1 WHERE id = $2")
-        .bind(message_id).bind(channel_id).execute(&state.db.pg).await?;
+        .bind(message_id)
+        .bind(channel_id)
+        .execute(&state.db.pg)
+        .await?;
 
     // Set slowmode
     if rate_limit > 0 {
         let mut conn = state.redis.clone();
         let key = format!("slowmode:{}:{}", channel_id, auth.id);
-        let _: Result<(), _> = redis::cmd("SET").arg(&key).arg("1").arg("EX").arg(rate_limit as i64)
-            .query_async(&mut conn).await;
+        let _: Result<(), _> = redis::cmd("SET")
+            .arg(&key)
+            .arg("1")
+            .arg("EX")
+            .arg(rate_limit as i64)
+            .query_async(&mut conn)
+            .await;
     }
 
     let response = MessageResponse {
@@ -430,16 +534,28 @@ async fn send_message(
         "message": serde_json::to_value(&response).unwrap_or_default(),
     });
     // Publish to channel-specific subject (for DM channel subscriptions)
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
     // Also publish to server subject so gateway subscribers on server.{id}.> receive it
     if let Some(sid) = server_id {
-        if let Err(e) = state.nats.publish(&format!("server.{}.events", sid), &event).await {
+        if let Err(e) = state
+            .nats
+            .publish(&format!("server.{}.events", sid), &event)
+            .await
+        {
             tracing::warn!(error = %e, "Failed to publish server NATS event");
         }
     }
-    if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish_durable(&format!("persist.messages.{}", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish durable NATS event");
     }
 
@@ -460,16 +576,22 @@ async fn edit_message(
     Path((channel_id, message_id)): Path<(i64, i64)>,
     Json(body): Json<EditMessageRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let server_id = check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
+    let server_id =
+        check_channel_permission(&state, channel_id, auth.id, Permissions::SEND_MESSAGES).await?;
 
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
     // Get author
-    let qr = state.db.scylla.execute_unpaged(
-        &state.db.prepared().get_message_author,
-        (channel_id, b, message_id),
-    ).await.map_err(scylla_err)?;
+    let qr = state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().get_message_author,
+            (channel_id, b, message_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let author_id: i64 = {
         let rows_result = qr.into_rows_result().map_err(scylla_err)?;
@@ -483,38 +605,64 @@ async fn edit_message(
     let is_author = author_id == auth.id.value() as i64;
     if !is_author {
         if body.content.is_some() || body.embeds.is_some() {
-            return Err(AppError::Forbidden("Can only edit your own messages".into()));
+            return Err(AppError::Forbidden(
+                "Can only edit your own messages".into(),
+            ));
         }
         match server_id {
-            Some(sid) => require_permissions(&state, sid, auth.id, Permissions::MANAGE_MESSAGES).await?,
-            None => return Err(AppError::Forbidden("Cannot edit others' messages in DMs".into())),
+            Some(sid) => {
+                require_permissions(&state, sid, auth.id, Permissions::MANAGE_MESSAGES).await?
+            }
+            None => {
+                return Err(AppError::Forbidden(
+                    "Cannot edit others' messages in DMs".into(),
+                ))
+            }
         }
     }
 
     let edited_ts = CqlTimestamp(chrono::Utc::now().timestamp_millis());
 
     if let Some(ref content) = body.content {
-        state.db.scylla.execute_unpaged(
-            &state.db.prepared().update_content,
-            (content.as_str(), edited_ts, channel_id, b, message_id),
-        ).await.map_err(scylla_err)?;
+        state
+            .db
+            .scylla
+            .execute_unpaged(
+                &state.db.prepared().update_content,
+                (content.as_str(), edited_ts, channel_id, b, message_id),
+            )
+            .await
+            .map_err(scylla_err)?;
     }
 
     if let Some(ref embeds) = body.embeds {
         let embeds_str = embeds.to_string();
-        state.db.scylla.execute_unpaged(
-            &state.db.prepared().update_embeds,
-            (embeds_str.as_str(), edited_ts, channel_id, b, message_id),
-        ).await.map_err(scylla_err)?;
+        state
+            .db
+            .scylla
+            .execute_unpaged(
+                &state.db.prepared().update_embeds,
+                (embeds_str.as_str(), edited_ts, channel_id, b, message_id),
+            )
+            .await
+            .map_err(scylla_err)?;
     }
 
     let event = serde_json::json!({
         "type": "MESSAGE_UPDATE", "channel_id": channel_id, "message_id": message_id,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
-    if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish_durable(&format!("persist.messages.{}", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish durable MESSAGE_UPDATE event");
     }
 
@@ -531,10 +679,15 @@ async fn delete_message(
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
-    let qr = state.db.scylla.execute_unpaged(
-        &state.db.prepared().get_message_author,
-        (channel_id, b, message_id),
-    ).await.map_err(scylla_err)?;
+    let qr = state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().get_message_author,
+            (channel_id, b, message_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let author_id: i64 = {
         let rows_result = qr.into_rows_result().map_err(scylla_err)?;
@@ -550,18 +703,31 @@ async fn delete_message(
         check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
     }
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().soft_delete,
-        (channel_id, b, message_id),
-    ).await.map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().soft_delete,
+            (channel_id, b, message_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({
         "type": "MESSAGE_DELETE", "channel_id": channel_id, "message_id": message_id,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
-    if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish_durable(&format!("persist.messages.{}", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish durable MESSAGE_DELETE event");
     }
 
@@ -582,31 +748,48 @@ async fn bulk_delete(
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
     if body.messages.len() < 2 || body.messages.len() > 100 {
-        return Err(AppError::BadRequest("Must provide 2-100 message IDs".into()));
+        return Err(AppError::BadRequest(
+            "Must provide 2-100 message IDs".into(),
+        ));
     }
 
     let mut errors = Vec::new();
     for &msg_id in &body.messages {
         let snowflake = Snowflake::from(msg_id);
         let b = bucket::bucket_from_snowflake(snowflake);
-        if let Err(e) = state.db.scylla.execute_unpaged(
-            &state.db.prepared().soft_delete,
-            (channel_id, b, msg_id),
-        ).await {
+        if let Err(e) = state
+            .db
+            .scylla
+            .execute_unpaged(&state.db.prepared().soft_delete, (channel_id, b, msg_id))
+            .await
+        {
             tracing::warn!(message_id = msg_id, error = %e, "Failed to soft-delete message");
             errors.push(msg_id);
         }
     }
 
     // Only dispatch event for successfully deleted messages
-    let deleted_ids: Vec<i64> = body.messages.iter().filter(|id| !errors.contains(id)).copied().collect();
+    let deleted_ids: Vec<i64> = body
+        .messages
+        .iter()
+        .filter(|id| !errors.contains(id))
+        .copied()
+        .collect();
     let event = serde_json::json!({
         "type": "MESSAGE_DELETE_BULK", "channel_id": channel_id, "ids": deleted_ids,
     });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
-    if let Err(e) = state.nats.publish_durable(&format!("persist.messages.{}", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish_durable(&format!("persist.messages.{}", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish durable MESSAGE_DELETE_BULK event");
     }
 
@@ -622,16 +805,18 @@ async fn get_pins(
 ) -> Result<impl IntoResponse, AppError> {
     check_channel_permission(&state, channel_id, auth.id, Permissions::VIEW_CHANNEL).await?;
 
-    let qr = state.db.scylla.execute_unpaged(
-        &state.db.prepared().get_pin_ids,
-        (channel_id,),
-    ).await.map_err(scylla_err)?;
+    let qr = state
+        .db
+        .scylla
+        .execute_unpaged(&state.db.prepared().get_pin_ids, (channel_id,))
+        .await
+        .map_err(scylla_err)?;
 
     let mut pin_ids = Vec::new();
     if let Ok(rows_result) = qr.into_rows_result() {
         if let Ok(iter) = rows_result.rows::<(i64,)>() {
-            for row in iter {
-                if let Ok(r) = row { pin_ids.push(r.0); }
+            for r in iter.flatten() {
+                pin_ids.push(r.0);
             }
         }
     }
@@ -647,10 +832,15 @@ async fn get_pins(
     let mut messages = Vec::new();
     for (b, ids) in &by_bucket {
         for msg_id in ids {
-            let qr = state.db.scylla.execute_unpaged(
-                &state.db.prepared().get_message_by_id,
-                (channel_id, *b, *msg_id),
-            ).await.map_err(scylla_err)?;
+            let qr = state
+                .db
+                .scylla
+                .execute_unpaged(
+                    &state.db.prepared().get_message_by_id,
+                    (channel_id, *b, *msg_id),
+                )
+                .await
+                .map_err(scylla_err)?;
             let rows = extract_msg_rows(qr);
             for r in rows {
                 messages.push(row_to_response(r));
@@ -669,10 +859,12 @@ async fn pin_message(
     check_channel_permission(&state, channel_id, auth.id, Permissions::MANAGE_MESSAGES).await?;
 
     // Max 50 pins
-    let qr = state.db.scylla.execute_unpaged(
-        &state.db.prepared().count_pins,
-        (channel_id,),
-    ).await.map_err(scylla_err)?;
+    let qr = state
+        .db
+        .scylla
+        .execute_unpaged(&state.db.prepared().count_pins, (channel_id,))
+        .await
+        .map_err(scylla_err)?;
 
     let count: i64 = {
         let rows_result = qr.into_rows_result().map_err(scylla_err)?;
@@ -681,17 +873,24 @@ async fn pin_message(
     };
 
     if count >= 50 {
-        return Err(AppError::BadRequest("Channel has reached max pins (50)".into()));
+        return Err(AppError::BadRequest(
+            "Channel has reached max pins (50)".into(),
+        ));
     }
 
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
     // Verify the message exists and is not deleted
-    let qr = state.db.scylla.execute_unpaged(
-        &state.db.prepared().check_message_exists,
-        (channel_id, b, message_id),
-    ).await.map_err(scylla_err)?;
+    let qr = state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().check_message_exists,
+            (channel_id, b, message_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let exists = {
         let rows_result = qr.into_rows_result().map_err(scylla_err)?;
@@ -705,19 +904,30 @@ async fn pin_message(
         return Err(AppError::NotFound("Message not found".into()));
     }
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().set_pinned,
-        (channel_id, b, message_id),
-    ).await.map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(&state.db.prepared().set_pinned, (channel_id, b, message_id))
+        .await
+        .map_err(scylla_err)?;
 
     let now = CqlTimestamp(chrono::Utc::now().timestamp_millis());
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().insert_pin,
-        (channel_id, message_id, auth.id.value() as i64, now),
-    ).await.map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().insert_pin,
+            (channel_id, message_id, auth.id.value() as i64, now),
+        )
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({ "type": "CHANNEL_PINS_UPDATE", "channel_id": channel_id });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 
@@ -734,18 +944,29 @@ async fn unpin_message(
     let snowflake = Snowflake::from(message_id);
     let b = bucket::bucket_from_snowflake(snowflake);
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().unset_pinned,
-        (channel_id, b, message_id),
-    ).await.map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(
+            &state.db.prepared().unset_pinned,
+            (channel_id, b, message_id),
+        )
+        .await
+        .map_err(scylla_err)?;
 
-    state.db.scylla.execute_unpaged(
-        &state.db.prepared().delete_pin,
-        (channel_id, message_id),
-    ).await.map_err(scylla_err)?;
+    state
+        .db
+        .scylla
+        .execute_unpaged(&state.db.prepared().delete_pin, (channel_id, message_id))
+        .await
+        .map_err(scylla_err)?;
 
     let event = serde_json::json!({ "type": "CHANNEL_PINS_UPDATE", "channel_id": channel_id });
-    if let Err(e) = state.nats.publish(&format!("channel.{}.messages", channel_id), &event).await {
+    if let Err(e) = state
+        .nats
+        .publish(&format!("channel.{}.messages", channel_id), &event)
+        .await
+    {
         tracing::warn!(error = %e, "Failed to publish NATS event");
     }
 
