@@ -2,6 +2,16 @@
 
 dev:
 	docker compose up -d
+	@echo "Waiting for infrastructure..."
+	@until docker compose exec -T pgbouncer pg_isready -h localhost -p 6432 >/dev/null 2>&1 || \
+	       docker compose exec -T postgres pg_isready -U lumiere >/dev/null 2>&1; do \
+		sleep 2; \
+	done
+	@until docker compose exec -T scylladb cqlsh -e "SELECT now() FROM system.local" >/dev/null 2>&1; do \
+		echo "  ScyllaDB starting..."; \
+		sleep 5; \
+	done
+	@echo "Infrastructure ready!"
 	cargo run --bin lumiere-server
 
 test: test-unit test-integration
@@ -45,5 +55,6 @@ load-test-storm:
 	k6 run -e BASE_URL=http://localhost:8080 load-tests/scenarios/connection_storm.js
 
 clean:
+	docker compose down -v
 	docker compose -f docker-compose.test.yml down -v
 	cargo clean

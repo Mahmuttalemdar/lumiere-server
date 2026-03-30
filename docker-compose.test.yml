@@ -51,7 +51,7 @@ services:
       retries: 10
 
   nats-test:
-    image: nats:2.10
+    image: nats:2.10-alpine
     ports:
       - "14222:4222"
       - "18222:8222"
@@ -60,7 +60,8 @@ services:
       - "--store_dir=/data"
       - "-m"
       - "8222"
-    # NATS scratch image has no shell tools (wget/curl/nc)
-    # so we disable healthcheck and rely on fast startup (~1s)
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8222/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 10

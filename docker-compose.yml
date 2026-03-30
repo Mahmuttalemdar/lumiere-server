@@ -31,12 +31,13 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:latest
     ports:
-      - "6432:6432"
+      - "6432:5432"
     environment:
       DATABASE_URL: postgres://lumiere:lumiere_dev@postgres:5432/lumiere
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 1000
       DEFAULT_POOL_SIZE: 50
+      AUTH_TYPE: scram-sha-256
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,15 +56,15 @@ services:
       retries: 5
 
   nats:
-    image: nats:latest
+    image: nats:2.10-alpine
     ports:
       - "4222:4222"
       - "8222:8222"
     command:
       - "--jetstream"
       - "--store_dir=/data"
-      - "--max_mem_store=256M"
-      - "--max_file_store=1G"
+      - "-m"
+      - "8222"
     volumes:
       - nats_data:/data
     healthcheck:

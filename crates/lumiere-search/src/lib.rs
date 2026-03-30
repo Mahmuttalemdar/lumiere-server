@@ -204,12 +204,15 @@ impl SearchService {
         let timeout = Some(Duration::from_secs(30));
         let interval = Some(Duration::from_millis(200));
 
-        // Create the index if it doesn't exist (idempotent).
-        let task = self.client.create_index(MESSAGES_INDEX, Some("id")).await?;
+        // Create the index if it doesn't exist.
+        // We check first to avoid a 30s wait_for_completion on an "already exists" failure.
+        let index_exists = self.client.get_index(MESSAGES_INDEX).await.is_ok();
 
-        // Wait for index creation to complete.
-        task.wait_for_completion(&self.client, timeout, interval)
-            .await?;
+        if !index_exists {
+            let task = self.client.create_index(MESSAGES_INDEX, Some("id")).await?;
+            task.wait_for_completion(&self.client, timeout, interval)
+                .await?;
+        }
 
         let index = self.client.index(MESSAGES_INDEX);
 
