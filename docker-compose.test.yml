@@ -55,9 +55,12 @@ services:
     ports:
       - "14222:4222"
       - "18222:8222"
-    command: "--jetstream --store_dir=/data -m 18222"
+    command:
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "-m"
+      - "8222"
+    # NATS scratch image has no shell tools (wget/curl/nc)
+    # so we disable healthcheck and rely on fast startup (~1s)
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8222/healthz || exit 1"]
-      interval: 3s
-      timeout: 2s
-      retries: 10
+      disable: true
