@@ -10,13 +10,14 @@ test-unit:
 	cargo test --lib --all
 
 test-integration:
-	docker compose -f docker-compose.test.yml up -d --wait
-	@echo "Waiting for ScyllaDB..."
-	@for i in $$(seq 1 30); do \
-		docker compose -f docker-compose.test.yml exec -T scylladb-test cqlsh -e "SELECT now() FROM system.local" 2>/dev/null && break; \
+	docker compose -f docker-compose.test.yml up -d
+	@echo "Waiting for services..."
+	@until docker compose -f docker-compose.test.yml exec -T scylladb-test cqlsh -e "SELECT now() FROM system.local" >/dev/null 2>&1; do \
+		echo "  ScyllaDB not ready, retrying..."; \
 		sleep 5; \
 	done
-	LUMIERE_ENV=test cargo test --tests -p lumiere-server; \
+	@echo "All services ready!"
+	LUMIERE_ENV=test cargo test --tests -p lumiere-server -- --test-threads=1; \
 	EXIT_CODE=$$?; \
 	docker compose -f docker-compose.test.yml down -v; \
 	exit $$EXIT_CODE
